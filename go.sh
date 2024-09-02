@@ -3,27 +3,52 @@
 P8COMPILER=~/x16/prog8/prog8compiler-10.3.1-all.jar
 X16EMU=~/x16/x16emu/x16emu
 
-P8SRC=$1
-if [ ! -f $P8SRC ]
+PARAM1=$1
+if [ "X$PARAM1" == "X" ]
 then
-	echo "No such prog8 file"
+	echo "Pass .p8 file or .prg file"
 	exit
 fi
-PRGPATH=${P8SRC%.p8}.prg
-PRG=${PRGPATH##*/}
 
-if [ ! -d build ]
+PARAM1BASE=${PARAM1%.*}
+P8SRC=${PARAM1BASE}.p8
+P8PRG=${PARAM1BASE}.prg
+PRG=${P8PRG###*/}
+
+if [ "$PARAM1" == "$P8SRC" ]
 then
-	mkdir build
+
+	if [ ! -f $P8SRC ]
+	then
+		echo "No such file $P8SRC"
+		exit
+	fi
+
+
+	if [ ! -d build ]
+	then
+		mkdir build
+	fi
+
+	# compile
+	java -jar $P8COMPILER -target cx16 -out build $P8SRC 
+
+	# if successful
+	if [ $? -eq 0 ]
+	then
+		cp build/$PRG .
+		# run
+		$X16EMU -scale 2 -run -prg $PRG
+	fi
 fi
 
-# compile
-java -jar $P8COMPILER -target cx16 -out build $P8SRC 
-
-# if successful
-if [ $? -eq 0 ]
+if [ "$PARAM1" == "$P8PRG" ]
 then
-	cp build/$PRG .
-	# run
-	$X16EMU -scale 2 -run -prg $PRG
+	if [ ! -f $P8PRG ]
+	then
+		echo "No such file $P8PRG"
+		exit
+	fi
+
+	$X16EMU -scale 2 -run -prg $P8PRG
 fi
