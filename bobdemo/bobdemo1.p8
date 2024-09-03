@@ -1,6 +1,7 @@
 %import syslib
 %import textio
 %import diskio
+%import keycode
 %zeropage basicsafe
 
 main {
@@ -126,20 +127,20 @@ main {
 		ubyte keycode = keynum & $7F
         if keynum & $80 ==0 {
 			when keycode {
-				$12 -> key_bits |= KEY_BITS_W ; w - up
-				$20 -> key_bits |= KEY_BITS_S ; s - down
-				$1F -> key_bits |= KEY_BITS_A ; a - left
-				$21 -> key_bits |= KEY_BITS_D ; d - right
-				$2F -> key_bits |= KEY_BITS_X ; x - exit
+				keycodes.KEYCODE_W -> key_bits |= KEY_BITS_W ; w - up
+				keycodes.KEYCODE_S -> key_bits |= KEY_BITS_S ; s - down
+				keycodes.KEYCODE_A -> key_bits |= KEY_BITS_A ; a - left
+				keycodes.KEYCODE_D -> key_bits |= KEY_BITS_D ; d - right
+				keycodes.KEYCODE_X -> key_bits |= KEY_BITS_X ; x - exit
 			}
 		}
         else {
 			when keycode {
-				$12 -> key_bits &= KEY_MASK_W ; w - up
-				$20 -> key_bits &= KEY_MASK_S ; s - down
-				$1F -> key_bits &= KEY_MASK_A ; a - left
-				$21 -> key_bits &= KEY_MASK_D ; d - right
-				$2F -> key_bits &= KEY_MASK_X ; x - exit
+				keycodes.KEYCODE_W -> key_bits &= KEY_MASK_W ; w - up
+				keycodes.KEYCODE_S -> key_bits &= KEY_MASK_S ; s - down
+				keycodes.KEYCODE_A -> key_bits &= KEY_MASK_A ; a - left
+				keycodes.KEYCODE_D -> key_bits &= KEY_MASK_D ; d - right
+				keycodes.KEYCODE_X -> key_bits &= KEY_MASK_X ; x - exit
 			}
 		}
 
