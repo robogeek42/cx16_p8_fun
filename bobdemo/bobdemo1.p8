@@ -62,6 +62,9 @@ main {
 	ubyte screen_height_tiles
 	ubyte screen_map_width			; size of map enabled in L0_CONFIG (32x32)
 	ubyte screen_map_height
+	uword screen_map_widthw			; size of map as word
+	uword screen_map_heightw
+	uword screen_map_size2;
 	ubyte map_width_tiles 			; overall map size (larger than that which is enabled)
 	ubyte map_height_tiles 
 	uword map_width_tilesw 			; overall map size as word
@@ -111,6 +114,9 @@ main {
 		screen_height_tiles = lsb(screen_height_pixels >> 4)
 		screen_map_width = 32
 		screen_map_height = 32
+		screen_map_widthw = 32
+		screen_map_heightw = 32
+		screen_map_size2 = screen_map_widthw * screen_map_height * 2
 	}
 
 ;============================================================
@@ -154,19 +160,19 @@ main {
 					do_scroll(0, speed)
 					bob_dir = 1
 				}
-			}
+			} else
 			if (key_bits & KEY_BITS_S) != 0 {
 				if can_scroll(1, speed) {
 					do_scroll(1, speed)
 					bob_dir = 0
 				}
-			}
+			} else
 			if (key_bits & KEY_BITS_A) != 0 {
 				if can_scroll(2, speed) {
 					do_scroll(2, speed)
 					bob_dir = 2
 				}
-			}
+			} else
 			if (key_bits & KEY_BITS_D) != 0 {
 				if can_scroll(3, speed) {
 					do_scroll(3, speed)
@@ -292,6 +298,7 @@ main {
 		; make sure it contains the correct col,row from the original map
 		; if not, load it
 
+		ubyte i
 		if speed_px > 0 and cols_loaded[next_view_col] != next_real_col {
 			ubyte from_row = screen_pos_to_real_ty(0)
 			ubyte to_row = screen_pos_to_view_ty(0)
@@ -303,7 +310,11 @@ main {
 			emudbg.console_write(conv.str_ub(next_real_col))
 			emudbg.console_write(" from row ")
 			emudbg.console_write(conv.str_ub(from_row))
-			emudbg.console_write("  ")
+			emudbg.console_write(" ")
+			for i in 0 to 31 {
+				emudbg.console_write(conv.str_uw(cols_loaded[i])) 
+				emudbg.console_write(" ")
+			}
 		}
 		if speed_py > 0 and rows_loaded[next_view_row] != next_real_row {
 			ubyte from_col = screen_pos_to_real_tx(0)
@@ -316,7 +327,11 @@ main {
 			emudbg.console_write(conv.str_ub(next_real_row))
 			emudbg.console_write(" from col ")
 			emudbg.console_write(conv.str_ub(from_col))
-			emudbg.console_write("  ")
+			emudbg.console_write(" ")
+			for i in 0 to 31 {
+				emudbg.console_write(conv.str_uw(rows_loaded[i])) 
+				emudbg.console_write(" ")
+			}
 		}
 		emudbg.console_write("\n")
 	}
@@ -355,6 +370,7 @@ main {
 		emudbg.console_write(conv.str_ub(real_ty))
 		emudbg.console_write("    ")
 
+		ubyte i
 		if speed_px > 0 and cols_loaded[prev_view_col] != prev_real_col {
 			load_map_col(prev_real_col, real_ty, prev_view_col, view_ty)
 			emudbg.console_write(" load col ")
@@ -363,7 +379,11 @@ main {
 			emudbg.console_write(conv.str_ub(prev_real_col))
 			emudbg.console_write(" from row ")
 			emudbg.console_write(conv.str_ub(real_ty))
-			emudbg.console_write("   ")
+			emudbg.console_write(" ")
+			for i in 0 to 31 {
+				emudbg.console_write(conv.str_uw(cols_loaded[i])) 
+				emudbg.console_write(" ")
+			}
 		}
 		if speed_py > 0 and rows_loaded[prev_view_row] != prev_real_row {
 			load_map_row(real_tx, prev_real_row, view_tx, prev_view_row)
@@ -373,7 +393,11 @@ main {
 			emudbg.console_write(conv.str_ub(prev_real_row))
 			emudbg.console_write(" from col ")
 			emudbg.console_write(conv.str_ub(real_tx))
-			emudbg.console_write("   ")
+			emudbg.console_write(" ")
+			for i in 0 to 31 {
+				emudbg.console_write(conv.str_uw(rows_loaded[i])) 
+				emudbg.console_write(" ")
+			}
 		}
 		emudbg.console_write("\n")
 	}
@@ -594,8 +618,8 @@ main {
 	sub load_map_row(uword src_col, uword src_row, uword dest_col, uword dest_row) {
 		ubyte x
 		uword cpuptr = $A000 + src_row * map_width_tilesw + src_col
-		uword screen_map_widthw = screen_map_width as uword
-		uword mapbaseptr = mapBaseAddr + (dest_row * screen_map_widthw + dest_col)*2
+		uword mapOffset = (dest_row * screen_map_widthw + dest_col)*2
+		uword mapbaseptr = mapBaseAddr + + mapOffset
 		; VERA load 
 		cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 		cx16.VERA_ADDR_M = msb(mapbaseptr)
@@ -604,6 +628,17 @@ main {
 			cx16.VERA_DATA0 = @(cpuptr)
 			cx16.VERA_DATA0 = 0
 			cpuptr++
+
+			; Check if the VERA address is going outside of the View tile map (32x32 tiles)
+			mapOffset+=2
+			if mapOffset > screen_map_size2 {
+				; if so, wrap the address
+				mapOffset -= screen_map_size2
+				mapbaseptr = mapBaseAddr + mapOffset
+				cx16.VERA_ADDR_L =lsb(mapbaseptr) 
+				cx16.VERA_ADDR_M = msb(mapbaseptr)
+				cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
+			}
 		}
 		rows_loaded[lsb(dest_row)] = lsb(src_row)
 		update_low_hi_row_index()
@@ -611,23 +646,46 @@ main {
 	sub load_map_col(uword src_col, uword src_row, uword dest_col, uword dest_row) {
 		ubyte y
 		uword cpuptr = $A000 + src_row * map_width_tilesw + src_col
-		uword screen_map_widthw = screen_map_width as uword
-		uword mapbaseptr = mapBaseAddr + (dest_row * screen_map_widthw + dest_col)*2
+		uword mapOffset = (dest_row * screen_map_widthw + dest_col)*2
+		uword mapbaseptr = mapBaseAddr + mapOffset
 		; VERA load 
 		cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 		cx16.VERA_ADDR_M = msb(mapbaseptr)
 		cx16.VERA_ADDR_H = mapBaseBank | %01110000     ; bank=1, increment 32 * 2
-		for y in 0 to screen_map_height-1 {
+		for y in 0 to screen_map_height {
 			cx16.VERA_DATA0 = @(cpuptr)
 			cpuptr += map_width_tilesw
+
+			; Check if the VERA address is going outside of the View tile map (32x32 tiles)
+			mapOffset+=2
+			if mapOffset > screen_map_size2 {
+				; if so, wrap the address
+				mapOffset -= screen_map_size2
+				mapbaseptr = mapBaseAddr + mapOffset
+				cx16.VERA_ADDR_L =lsb(mapbaseptr) 
+				cx16.VERA_ADDR_M = msb(mapbaseptr)
+				cx16.VERA_ADDR_H = mapBaseBank | %01110000     ; bank=1, increment 32 * 2
+			}
 		}
+		mapOffset = (dest_row * screen_map_widthw + dest_col)*2
 		cpuptr = $A000 + src_row * map_width_tilesw + src_col
 		cx16.VERA_ADDR_L =lsb(mapbaseptr+1) 
 		cx16.VERA_ADDR_M = msb(mapbaseptr+1)
 		cx16.VERA_ADDR_H = mapBaseBank | %01110000     ; bank=1, increment 32 * 2
-		for y in 0 to screen_map_height-1 {
+		for y in 0 to screen_map_height {
 			cx16.VERA_DATA0 = 0
 			cpuptr += map_width_tilesw
+
+			; Check if the VERA address is going outside of the View tile map (32x32 tiles)
+			mapOffset+=2
+			if mapOffset > screen_map_size2 {
+				; if so, wrap the address
+				mapOffset -= screen_map_size2
+				mapbaseptr = mapBaseAddr + mapOffset
+				cx16.VERA_ADDR_L =lsb(mapbaseptr+1) 
+				cx16.VERA_ADDR_M = msb(mapbaseptr+1)
+				cx16.VERA_ADDR_H = mapBaseBank | %01110000     ; bank=1, increment 32 * 2
+			}
 		}
 		cols_loaded[lsb(dest_col)] = lsb(src_col)
 		update_low_hi_col_index()
