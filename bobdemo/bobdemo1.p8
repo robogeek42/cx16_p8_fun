@@ -185,10 +185,6 @@ main {
 
 			if (bob_dir != 255)
 			{
-				emudbg.console_write(conv.str_uw0(screen_offset_px>>4))
-				emudbg.console_write(" ")
-				emudbg.console_write(conv.str_uw0(screen_offset_py>>4))
-				emudbg.console_write(" ")
 				uword tm = cbm.RDTIM16()
 				if (bob_anim_time < tm)
 				{
@@ -269,26 +265,15 @@ main {
 		next_view_col = (view_tx + 1) % 32
 		next_real_col = (real_tx + 1) % map_width_tiles
 
-		emudbg.console_write(conv.str_ub(view_tx))
-		emudbg.console_write(" ")
-		emudbg.console_write(conv.str_ub(real_tx))
-		emudbg.console_write("   ")
-
-		; check col,row after the one at the right of the screen
-		; make sure it contains the correct col,row from the original map
+		; check col after the one at the right of the screen
+		; make sure it contains the correct col from the original map
 		; if not, load it
 
-		ubyte dst_row = screen_pos_to_view_ty(0)
-		load_map_col(next_real_col, next_view_col)
+		if cols_loaded[next_view_col] != next_real_col {
+			load_map_col(next_real_col, next_view_col)
+		}
 
-		emudbg.console_write(" load col ")
-		emudbg.console_write(conv.str_ub(next_view_col))
-		emudbg.console_write(" with ")
-		emudbg.console_write(conv.str_ub(next_real_col))
-		emudbg.console_write(":")
-
-		verify()
-		emudbg.console_write("\n")
+		;verify()
 	}
 	sub do_scroll_down(uword speed_py)
 	{
@@ -303,26 +288,15 @@ main {
 		next_view_row = (view_ty + 1) % 32
 		next_real_row = (real_ty + 1) % map_height_tiles
 
-		emudbg.console_write(conv.str_ub(view_ty))
-		emudbg.console_write(" ")
-		emudbg.console_write(conv.str_ub(real_ty))
-		emudbg.console_write("   ")
-
-		; check col,row after the one at the right of the screen
-		; make sure it contains the correct col,row from the original map
+		; check row after the one at the bottom of the screen
+		; make sure it contains the correct row from the original map
 		; if not, load it
 
-		ubyte dst_col = screen_pos_to_view_tx(0)
-		load_map_row(next_real_row, next_view_row)
+		if rows_loaded[next_view_row] != next_real_row {
+			load_map_row(next_real_row, next_view_row)
+		}
 
-		emudbg.console_write(" load row ")
-		emudbg.console_write(conv.str_ub(next_view_row))
-		emudbg.console_write(" with ")
-		emudbg.console_write(conv.str_ub(next_real_row))
-		emudbg.console_write(":")
-
-		verify()
-		emudbg.console_write("\n")
+		;verify()
 	}
 	sub do_scroll_left(uword speed_px)
 	{
@@ -338,20 +312,11 @@ main {
 		prev_view_col = (view_tx - 1) % 32
 		prev_real_col = (real_tx - 1) % map_width_tiles
 
-		emudbg.console_write(conv.str_ub(view_tx))
-		emudbg.console_write(" ")
-		emudbg.console_write(conv.str_ub(real_tx))
-		emudbg.console_write("    ")
+		if cols_loaded[prev_view_col] != prev_real_col {
+			load_map_col(prev_real_col, prev_view_col)
+		}
 
-		load_map_col(prev_real_col, prev_view_col)
-		emudbg.console_write(" load col ")
-		emudbg.console_write(conv.str_ub(prev_view_col))
-		emudbg.console_write(" with ")
-		emudbg.console_write(conv.str_ub(prev_real_col))
-		emudbg.console_write(":")
-
-		verify()
-		emudbg.console_write("\n")
+		;verify()
 	}
 	sub do_scroll_up(uword speed_py)
 	{
@@ -367,20 +332,11 @@ main {
 		prev_view_row = (view_ty - 1) % 32
 		prev_real_row = (real_ty - 1) % map_height_tiles
 
-		emudbg.console_write(conv.str_ub(view_ty))
-		emudbg.console_write(" ")
-		emudbg.console_write(conv.str_ub(real_ty))
-		emudbg.console_write("    ")
+		if rows_loaded[prev_view_row] != prev_real_row {
+			load_map_row(prev_real_row, prev_view_row)
+		}
 
-		load_map_row(prev_real_row, prev_view_row)
-		emudbg.console_write(" load row ")
-		emudbg.console_write(conv.str_ub(prev_view_row))
-		emudbg.console_write(" with ")
-		emudbg.console_write(conv.str_ub(prev_real_row))
-		emudbg.console_write(":")
-
-		verify()
-		emudbg.console_write("\n")
+		;verify()
 	}
 
 ;============================================================
@@ -630,16 +586,6 @@ main {
 	}
 	
 	sub load_map_row(uword src_row, uword dest_row) {
-		emudbg.console_write("load row (")
-		emudbg.console_write(conv.str_uw(0))
-		emudbg.console_write(",")
-		emudbg.console_write(conv.str_uw(src_row))
-		emudbg.console_write(") (")
-		emudbg.console_write(conv.str_uw(0))
-		emudbg.console_write(",")
-		emudbg.console_write(conv.str_uw(dest_row))
-		emudbg.console_write(") ")
-		;emudbg.console_value1(0)
 
 		ubyte x
 		uword mapOffset = (dest_row * screen_map_widthw + 0)*2
@@ -651,7 +597,6 @@ main {
 		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
 		for x in 0 to screen_map_width-1 {
 			uword cpuptr = $A000 + src_row * map_width_tilesw + cols_loaded[lsb(dc)]
-;			emudbg.console_write(" src ") emudbg.console_write(conv.str_uw(cols_loaded[lsb(dc)])) emudbg.console_write("x") emudbg.console_write(conv.str_uw(src_row)) emudbg.console_write(" ")
 			cx16.VERA_DATA0 = @(cpuptr)
 			cx16.VERA_DATA0 = 0
 
@@ -671,30 +616,17 @@ main {
 			; increment the column index so we can look up what column needs to be read from main map
 			dc = (dc+1) % screen_map_width
 		}
-;		emudbg.console_write("\n")
 		
 		rows_loaded[lsb(dest_row)] = lsb(src_row)
 		update_low_hi_row_index()
 	}
 	sub load_map_col(uword src_col, uword dest_col) {
-		emudbg.console_write("load col (")
-		emudbg.console_write(conv.str_uw(src_col))
-		emudbg.console_write(",")
-		emudbg.console_write(conv.str_uw(0))
-		emudbg.console_write(") (")
-		emudbg.console_write(conv.str_uw(dest_col))
-		emudbg.console_write(",")
-		emudbg.console_write(conv.str_uw(0))
-		emudbg.console_write(") ")
-		;emudbg.console_value1(0)
-		
 		uword mapbaseptr =  0
 		uword dr = 0
 		; VERA load 
 		ubyte y
 		for y in 0 to screen_map_height-1 {
 			uword cpuptr = $A000 + rows_loaded[lsb(dr)] * map_width_tilesw + src_col
-;			emudbg.console_write(" src ") emudbg.console_write(conv.str_uw(src_col)) emudbg.console_write("x") emudbg.console_write(conv.str_uw(rows_loaded[lsb(dr)])) emudbg.console_write(" ")
 			uword mapOffset = (dr * screen_map_widthw + dest_col)*2
 			if mapOffset > screen_map_size2 {
 				mapOffset -= screen_map_size2
@@ -708,7 +640,6 @@ main {
 			cx16.VERA_DATA0 = 0
 			dr = (dr+1) % screen_map_height
 		}
-;		emudbg.console_write("\n")
 
 		cols_loaded[lsb(dest_col)] = lsb(src_col)
 		update_low_hi_col_index()
@@ -746,7 +677,6 @@ main {
 					emudbg.console_write("-")
 					emudbg.console_write(conv.str_ubhex(C))
 					emudbg.console_write(" : ")
-%breakpoint
 					;return false
 				}
 			}
