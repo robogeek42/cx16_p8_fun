@@ -52,19 +52,21 @@ main {
 	const ubyte KEY_BITS_X   = $10
 	const ubyte KEY_MASK_X   = $EF
 
-	ubyte[8] v
-	bool main_exit = false
+	const ubyte BOB_DIR_DN = 0
+	const ubyte BOB_DIR_UP = 1
+	const ubyte BOB_DIR_LT = 2
+	const ubyte BOB_DIR_RT = 3
+
+	const uword screen_width_pixels = 320
+	const uword screen_height_pixels = 240
+	const ubyte screen_half_width_pixels = 160
+	const ubyte screen_half_height_pixels = 120
+
+	const ubyte view_map_size = 32			; size of map enabled in L0_CONFIG (32x32)
+	const uword view_map_sizew = 32			; size of map as word
+	const uword view_map_size_bytesw = 2048;		; num bytes for view map
 
 	; filled in at load_map() time
-	uword screen_width_pixels		; size of screen in pixels
-	uword screen_height_pixels
-	ubyte screen_width_tiles		; size of screen in tiles
-	ubyte screen_height_tiles
-	ubyte screen_map_width			; size of map enabled in L0_CONFIG (32x32)
-	ubyte screen_map_height
-	uword screen_map_widthw			; size of map as word
-	uword screen_map_heightw
-	uword screen_map_size2;
 	ubyte map_width_tiles 			; overall map size (larger than that which is enabled)
 	ubyte map_height_tiles 
 	uword map_width_tilesw 			; overall map size as word
@@ -81,13 +83,19 @@ main {
 	; position of the player relative to the screen in pixels
 	uword bob_screen_pos_px = 0
 	uword bob_screen_pos_py = 0
+	uword bob_px = 0
+	uword bob_py = 0
 
-	ubyte[32] rows_loaded
-	ubyte[32] cols_loaded
+	ubyte[view_map_size] rows_loaded
+	ubyte[view_map_size] cols_loaded
 	ubyte low_row_index = 0
 	ubyte low_col_index = 0
 	ubyte hi_row_index = 0
 	ubyte hi_col_index = 0
+
+	; save vector for VERA regs
+	ubyte[8] v
+	bool main_exit = false
 
 ;============================================================
 ; SCREEN SETUP FOR 4BPP
@@ -107,16 +115,6 @@ main {
         cx16.VERA_L0_CONFIG = %00000010 ; map h/w (0,0) = 32x32, color depth (10) = 4bpp, 256c off
         cx16.VERA_L0_MAPBASE = mapBase16_9
         cx16.VERA_L0_TILEBASE = tileBase16_11<<2 | %11 ; tile size 16x16
-
-		screen_width_pixels = 320
-		screen_height_pixels = 240
-		screen_width_tiles = lsb(screen_width_pixels >> 4)
-		screen_height_tiles = lsb(screen_height_pixels >> 4)
-		screen_map_width = 32
-		screen_map_height = 32
-		screen_map_widthw = 32
-		screen_map_heightw = 32
-		screen_map_size2 = screen_map_widthw * screen_map_heightw * 2
 	}
 
 ;============================================================
@@ -129,13 +127,25 @@ main {
 		diskio.chdir("assets")
 		load_tiles()
 
-		; place bob in the centre
-		bob_screen_pos_px = screen_width_pixels / 2
-		bob_screen_pos_py = screen_height_pixels / 2
+		; place bob in the centre of the screen
+		bob_screen_pos_px = screen_width_pixels >> 1
+		bob_screen_pos_py = screen_height_pixels >> 1
 
 		load_sprites()
 
-		load_map()
+		load_map_raw()
+
+		uword load_off_tx = map_width_tilesw >> 1
+		load_off_tx -= (bob_screen_pos_px >>4)
+
+		uword load_off_ty = map_height_tilesw >> 1
+		load_off_ty -= (bob_screen_pos_py >>4)
+
+		load_map_offset(load_off_tx, load_off_ty)
+
+		bob_px = (load_off_tx << 4) + bob_screen_pos_px
+		bob_py = (load_off_ty << 4) + bob_screen_pos_py
+		bob_anim(0, 0)
 		
         sys.set_irqd()
         uword old_keyhdl = cx16.KEYHDL
@@ -149,49 +159,133 @@ main {
 		; GAME LOOP
 		;============================================================
 
-		const ubyte speed=2
-		ubyte bobframe = 0
+		const ubyte bob_speed=2
+		ubyte bob_frame = 0
+		ubyte bob_dir = 3
 		do {
 			sys.wait(1);
-			ubyte bob_dir = 255
+			bool update_bob = false
 
 			if (key_bits & KEY_BITS_W) != 0 {
-				if can_scroll(0, speed) {
-					do_scroll(0, speed)
-					bob_dir = 1
+				bob_dir = BOB_DIR_UP
+				if is_tile_land( bob_px >> 4, (bob_py - bob_speed) >> 4 ) and is_tile_land( (bob_px+15) >> 4, (bob_py - bob_speed) >> 4 ) 
+				{
+					; check if we have to move back into the centre
+					if bob_screen_pos_py > screen_half_height_pixels {
+						bob_screen_pos_py -= bob_speed
+						bob_py -= bob_speed
+						update_bob = true
+					} else {
+						; normally just scroll the screen keeping bob in the centre
+						if can_scroll(bob_dir, bob_speed) {
+							do_scroll(bob_dir, bob_speed)
+							update_bob = true
+						} else {
+							; can't scroll? just move bob up the screen without scrolling
+							if bob_py > bob_speed + 16 {
+								bob_py -= bob_speed
+								bob_screen_pos_py -= bob_speed
+								update_bob = true
+							}
+						}
+					}
 				}
 			} else
 			if (key_bits & KEY_BITS_S) != 0 {
-				if can_scroll(1, speed) {
-					do_scroll(1, speed)
-					bob_dir = 0
+				bob_dir = BOB_DIR_DN
+				if is_tile_land( bob_px >> 4, (bob_py + bob_speed + 15) >> 4 ) and is_tile_land( (bob_px+15) >> 4, (bob_py + bob_speed + 15) >> 4 )
+				{
+					; check if we have to move back into the centre
+					if bob_screen_pos_py < screen_half_height_pixels {
+						bob_screen_pos_py += bob_speed
+						bob_py += bob_speed
+						update_bob = true
+					} else {
+						; normally just scroll the screen keeping bob in the centre
+						if can_scroll(bob_dir, bob_speed) {
+							do_scroll(bob_dir, bob_speed)
+							update_bob = true
+						} else {
+							; can't scroll? just move bob down the screen without scrolling
+							if bob_py + 16 < (map_height_tilesw <<4) - bob_speed - 16 {
+								bob_py += bob_speed
+								bob_screen_pos_py += bob_speed
+								update_bob = true
+							}
+						}
+					}
 				}
 			} else
 			if (key_bits & KEY_BITS_A) != 0 {
-				if can_scroll(2, speed) {
-					do_scroll(2, speed)
-					bob_dir = 2
+				bob_dir = BOB_DIR_LT
+				if is_tile_land( (bob_px - bob_speed) >> 4, bob_py >> 4 ) and is_tile_land( (bob_px - bob_speed) >> 4, (bob_py+15) >> 4 )
+				{
+					; check if we have to move back into the centre
+					if bob_screen_pos_px > screen_half_width_pixels {
+						bob_screen_pos_px -= bob_speed
+						bob_px -= bob_speed
+						update_bob = true
+					} else {
+						; normally just scroll the screen keeping bob in the centre
+						if can_scroll(bob_dir, bob_speed) {
+							do_scroll(bob_dir, bob_speed)
+							update_bob = true
+						} else {
+							; can't scroll? just move bob left without scrolling
+							if bob_px > bob_speed + 16 {
+								bob_px -= bob_speed
+								bob_screen_pos_px -= bob_speed
+								update_bob = true
+							}
+						}
+					}
 				}
 			} else
 			if (key_bits & KEY_BITS_D) != 0 {
-				if can_scroll(3, speed) {
-					do_scroll(3, speed)
-					bob_dir = 3
+				bob_dir = BOB_DIR_RT
+				if is_tile_land( (bob_px + bob_speed + 15) >> 4, bob_py >> 4 ) and is_tile_land( (bob_px + bob_speed + 15) >> 4, (bob_py+15) >> 4 ) 
+				{
+					; check if we have to move back into the centre
+					if bob_screen_pos_px < screen_half_width_pixels {
+						bob_screen_pos_px += bob_speed
+						bob_px += bob_speed
+						update_bob = true
+					} else {
+						if can_scroll(bob_dir, bob_speed) {
+							do_scroll(bob_dir, bob_speed)
+							update_bob = true
+						} else {
+							; can't scroll? just move bob right without scrolling
+							if bob_px + 16 < (map_width_tilesw <<4) - bob_speed - 16 {
+								bob_px += bob_speed
+								bob_screen_pos_px += bob_speed
+								update_bob = true
+							}
+						}
+					}
 				}
 			}
 			if ((key_bits & KEY_BITS_X) != 0) {
 				main_exit = true
 			}
 
-			if (bob_dir != 255)
+			if update_bob 
 			{
 				uword tm = cbm.RDTIM16()
 				if (bob_anim_time < tm)
 				{
-					bobframe = (bobframe+1) %4
+					bob_frame = (bob_frame+1) %4
 					bob_anim_time = tm + bob_anim_rate
 				}
-				bob_anim(bob_dir, bobframe)
+				bob_anim(bob_dir, bob_frame)
+				emudbg.console_write(conv.str_uw(bob_px))
+				emudbg.console_write(",")
+				emudbg.console_write(conv.str_uw(bob_py))
+				emudbg.console_write(" s ")
+				emudbg.console_write(conv.str_uw(bob_screen_pos_px))
+				emudbg.console_write(",")
+				emudbg.console_write(conv.str_uw(bob_screen_pos_py))
+				emudbg.console_write("    \n")
 			}
 		} until (main_exit == true)
 
@@ -200,42 +294,40 @@ main {
         sys.clear_irqd()
 	}
 
-	sub can_scroll(ubyte dir, ubyte speed) -> bool
+	sub can_scroll(ubyte dir, ubyte bob_speed) -> bool
 	{
 		when dir {
-			0 -> return can_scroll_up(speed)
-			1 -> return can_scroll_down(speed)
-			2 -> return can_scroll_left(speed)
-			3 -> return can_scroll_right(speed)
+			BOB_DIR_UP -> return can_scroll_up(bob_speed)
+			BOB_DIR_DN -> return can_scroll_down(bob_speed)
+			BOB_DIR_LT -> return can_scroll_left(bob_speed)
+			BOB_DIR_RT -> return can_scroll_right(bob_speed)
 		}
 	}
-	sub can_scroll_up(uword speed) -> bool
+	sub can_scroll_up(uword bob_speed) -> bool
 	{
-		ubyte off_ty = lsb(screen_offset_py >> 4)
-		if screen_offset_py >= speed or rows_loaded[off_ty] > 0 {
+		if screen_pos_to_real_ty(0) > 0 {
 			return true
 		}
 		return false
 	}
-	sub can_scroll_down(uword speed) -> bool
+	sub can_scroll_down(uword bob_speed) -> bool
 	{
-		ubyte endofscreen_tile = screen_pos_to_real_ty(screen_height_pixels + speed)
+		ubyte endofscreen_tile = screen_pos_to_real_ty(screen_height_pixels + bob_speed)
 		if endofscreen_tile+1 < map_height_tiles {
 			return true
 		}
 		return false
 	}
-	sub can_scroll_left(uword speed) -> bool
+	sub can_scroll_left(uword bob_speed) -> bool
 	{
-		ubyte off_tx = lsb(screen_offset_px >> 4)
-		if screen_offset_px >= speed or cols_loaded[off_tx] > 0 {
+		if screen_pos_to_real_tx(0) > 0 {
 			return true
 		}
 		return false
 	}
-	sub can_scroll_right(uword speed) -> bool
+	sub can_scroll_right(uword bob_speed) -> bool
 	{
-		ubyte endofscreen_tile = screen_pos_to_real_tx(screen_width_pixels + speed)
+		ubyte endofscreen_tile = screen_pos_to_real_tx(screen_width_pixels + bob_speed)
 		if endofscreen_tile+1 < map_width_tiles {
 			return true
 		}
@@ -243,13 +335,13 @@ main {
 	}
 
 
-	sub do_scroll(ubyte dir, ubyte speed)
+	sub do_scroll(ubyte dir, ubyte bob_speed)
 	{
 		when dir {
-			0 -> do_scroll_up(speed)
-			1 -> do_scroll_down(speed)
-			2 -> do_scroll_left(speed)
-			3 -> do_scroll_right(speed)
+			BOB_DIR_UP -> do_scroll_up(bob_speed)
+			BOB_DIR_DN -> do_scroll_down(bob_speed)
+			BOB_DIR_LT -> do_scroll_left(bob_speed)
+			BOB_DIR_RT -> do_scroll_right(bob_speed)
 		}
 	}
 	sub do_scroll_right(uword speed_px)
@@ -262,7 +354,7 @@ main {
 		screen_offset_px += speed_px
 		screen_offset_px &= $1FF
 		update_vera_hscroll(screen_offset_px)
-		next_view_col = (view_tx + 1) % 32
+		next_view_col = (view_tx + 1) % view_map_size
 		next_real_col = (real_tx + 1) % map_width_tiles
 
 		; check col after the one at the right of the screen
@@ -273,8 +365,9 @@ main {
 			load_map_col(next_real_col, next_view_col)
 		}
 
-		;verify()
+		bob_px += speed_px
 	}
+
 	sub do_scroll_down(uword speed_py)
 	{
 		ubyte view_ty = screen_pos_to_view_ty(screen_height_pixels-1)
@@ -285,7 +378,7 @@ main {
 		screen_offset_py += speed_py
 		screen_offset_py &= $1FF
 		update_vera_vscroll(screen_offset_py)
-		next_view_row = (view_ty + 1) % 32
+		next_view_row = (view_ty + 1) % view_map_size
 		next_real_row = (real_ty + 1) % map_height_tiles
 
 		; check row after the one at the bottom of the screen
@@ -296,7 +389,7 @@ main {
 			load_map_row(next_real_row, next_view_row)
 		}
 
-		;verify()
+		bob_py += speed_py
 	}
 	sub do_scroll_left(uword speed_px)
 	{
@@ -309,14 +402,14 @@ main {
 		screen_offset_px -= speed_px
 		screen_offset_px &= $1FF
 		update_vera_hscroll(screen_offset_px)
-		prev_view_col = (view_tx - 1) % 32
+		prev_view_col = (view_tx - 1) % view_map_size
 		prev_real_col = (real_tx - 1) % map_width_tiles
 
 		if cols_loaded[prev_view_col] != prev_real_col {
 			load_map_col(prev_real_col, prev_view_col)
 		}
 
-		;verify()
+		bob_px -= speed_px
 	}
 	sub do_scroll_up(uword speed_py)
 	{
@@ -329,14 +422,14 @@ main {
 		screen_offset_py -= speed_py
 		screen_offset_py &= $1FF
 		update_vera_vscroll(screen_offset_py)
-		prev_view_row = (view_ty - 1) % 32
+		prev_view_row = (view_ty - 1) % view_map_size
 		prev_real_row = (real_ty - 1) % map_height_tiles
 
 		if rows_loaded[prev_view_row] != prev_real_row {
 			load_map_row(prev_real_row, prev_view_row)
 		}
 
-		;verify()
+		bob_py -= speed_py
 	}
 
 ;============================================================
@@ -446,28 +539,6 @@ main {
 			; next address
 			saddr += 128
 		}
-
-		; Set sprite attributes for 1 sprite
-		const ubyte spriteBase12_5 = lsb( spriteBaseAddr  >> 5)
-		const ubyte spriteBase16_13 = msb( spriteBaseAddr >> 5) | spriteBaseBank << 3
-
-		const ubyte ZDEPTH = 3 ; In front of LAYER1
-		const ubyte FLIP = 0 ; Not flipped or mirrored
-
-		cx16.VERA_ADDR_L = $00
-		cx16.VERA_ADDR_M = $FC
-		cx16.VERA_ADDR_H = 1 | %00010000     ; bank=1, increment 1
-		cx16.VERA_DATA0 = spriteBase12_5
-		cx16.VERA_DATA0 = spriteBase16_13  ; mode is 0 = 4bpp
-		cx16.VERA_DATA0 = lsb(bob_screen_pos_px) ; X
-		cx16.VERA_DATA0 = msb(bob_screen_pos_px)
-		cx16.VERA_DATA0 = lsb(bob_screen_pos_py) ; Y
-		cx16.VERA_DATA0 = msb(bob_screen_pos_py)
-		cx16.VERA_DATA0 = FLIP | (ZDEPTH<<2)
-		cx16.VERA_DATA0 = %01010001 ; 16x16, use palette offset 1
-
-		; turn on sprites
-		cx16.VERA_DC_VIDEO |= %01000000
 	}
 
 ;============================================================
@@ -481,11 +552,23 @@ main {
 		ubyte spriteBase12_5 = lsb( saddr  >> 5)
 		ubyte spriteBase16_13 = msb( saddr >> 5) | spriteBaseBank << 3
 		
+		const ubyte ZDEPTH = 3 ; In front of LAYER1
+		const ubyte FLIP = 0 ; Not flipped or mirrored
+
 		cx16.VERA_ADDR_L = $00 ; sprite attribute #0 (BOB sprite)
 		cx16.VERA_ADDR_M = $FC
 		cx16.VERA_ADDR_H = 1 | %00010000     ; bank=1, increment 1
 		cx16.VERA_DATA0 = spriteBase12_5
 		cx16.VERA_DATA0 = spriteBase16_13  ; mode is 0 = 4bpp
+		cx16.VERA_DATA0 = lsb(bob_screen_pos_px) ; X
+		cx16.VERA_DATA0 = msb(bob_screen_pos_px)
+		cx16.VERA_DATA0 = lsb(bob_screen_pos_py) ; Y
+		cx16.VERA_DATA0 = msb(bob_screen_pos_py)
+		cx16.VERA_DATA0 = FLIP | (ZDEPTH<<2)
+		cx16.VERA_DATA0 = %01010001 ; 16x16, use palette offset 1
+
+		; turn on sprites
+		cx16.VERA_DC_VIDEO |= %01000000
 	}
 
 ;============================================================
@@ -522,6 +605,8 @@ main {
 		map_height_tilesw = map_height_tiles as uword
 		map_data_loaded = true
 		uword ptr 
+
+		; remove overlay for now
 		for ptr in $A000 to $A000 + 64*64-1 {
 			@(ptr) = @(ptr) & $F
 		}
@@ -531,31 +616,34 @@ main {
 		if map_data_loaded==false {
 			load_map_raw()
 		}
+
 		; load the screen portion of the map with map data
 		ubyte x
 		ubyte y
-		uword cpuptr = $A000 + src_row * map_width_tilesw + src_col
+		uword cpuoffset = src_row * map_width_tilesw + src_col
 
 		; VERA load 
 		cx16.VERA_ADDR_L =lsb(mapBaseAddr) 
 		cx16.VERA_ADDR_M = msb(mapBaseAddr)
 		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
-		for y in 0 to screen_map_height-1 {
-			uword yw = y as uword
-			cpuptr = $A000 + yw * map_width_tilesw
-			for x in 0 to screen_map_width-1 {
+		for y in 0 to view_map_size-1 {
+			uword cpuptr = $A000 + cpuoffset
+			for x in 0 to view_map_size-1 {
 				cx16.VERA_DATA0 = @(cpuptr)
 				cx16.VERA_DATA0 = 0
 				cpuptr += 1
+				
 			}
-			rows_loaded[y] = y
+			cpuoffset += map_width_tilesw
+			rows_loaded[y] = (y + lsb(src_row)) % map_height_tiles
 		}
 		update_low_hi_row_index()
-		for x in 0 to screen_map_width-1 {
-			cols_loaded[x] = x
+		for x in 0 to view_map_size-1 {
+			cols_loaded[x] = (x + lsb(src_col)) % map_width_tiles
 		}
 		update_low_hi_col_index()
 	}
+
 	sub load_map() {
 		if map_data_loaded==false {
 			load_map_raw()
@@ -568,10 +656,10 @@ main {
 		cx16.VERA_ADDR_L =lsb(mapBaseAddr) 
 		cx16.VERA_ADDR_M = msb(mapBaseAddr)
 		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
-		for y in 0 to screen_map_height-1 {
+		for y in 0 to view_map_size-1 {
 			uword yw = y as uword
 			cpuptr = $A000 + yw * map_width_tilesw
-			for x in 0 to screen_map_width-1 {
+			for x in 0 to view_map_size-1 {
 				cx16.VERA_DATA0 = @(cpuptr)
 				cx16.VERA_DATA0 = 0
 				cpuptr += 1
@@ -579,7 +667,7 @@ main {
 			rows_loaded[y] = y
 		}
 		update_low_hi_row_index()
-		for x in 0 to screen_map_width-1 {
+		for x in 0 to view_map_size-1 {
 			cols_loaded[x] = x
 		}
 		update_low_hi_col_index()
@@ -588,14 +676,14 @@ main {
 	sub load_map_row(uword src_row, uword dest_row) {
 
 		ubyte x
-		uword mapOffset = (dest_row * screen_map_widthw + 0)*2
+		uword mapOffset = (dest_row * view_map_sizew + 0)*2
 		uword mapbaseptr = mapBaseAddr + mapOffset
 		uword dc = 0
 		; VERA load 
 		cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 		cx16.VERA_ADDR_M = msb(mapbaseptr)
 		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
-		for x in 0 to screen_map_width-1 {
+		for x in 0 to view_map_size-1 {
 			uword cpuptr = $A000 + src_row * map_width_tilesw + cols_loaded[lsb(dc)]
 			cx16.VERA_DATA0 = @(cpuptr)
 			cx16.VERA_DATA0 = 0
@@ -604,9 +692,9 @@ main {
 			mapOffset+=2
 
 			; Check if the VERA address is going outside of the View tile map (32x32 tiles)
-			if mapOffset > screen_map_size2 {
+			if mapOffset > view_map_size_bytesw {
 				; if so, wrap the address
-				mapOffset -= screen_map_size2
+				mapOffset -= view_map_size_bytesw
 				mapbaseptr = mapBaseAddr + mapOffset
 				cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 				cx16.VERA_ADDR_M = msb(mapbaseptr)
@@ -614,7 +702,7 @@ main {
 			}
 
 			; increment the column index so we can look up what column needs to be read from main map
-			dc = (dc+1) % screen_map_width
+			dc = (dc+1) % view_map_size
 		}
 		
 		rows_loaded[lsb(dest_row)] = lsb(src_row)
@@ -625,11 +713,11 @@ main {
 		uword dr = 0
 		; VERA load 
 		ubyte y
-		for y in 0 to screen_map_height-1 {
+		for y in 0 to view_map_size-1 {
 			uword cpuptr = $A000 + rows_loaded[lsb(dr)] * map_width_tilesw + src_col
-			uword mapOffset = (dr * screen_map_widthw + dest_col)*2
-			if mapOffset > screen_map_size2 {
-				mapOffset -= screen_map_size2
+			uword mapOffset = (dr * view_map_sizew + dest_col)*2
+			if mapOffset > view_map_size_bytesw {
+				mapOffset -= view_map_size_bytesw
 			}
 			mapbaseptr = mapBaseAddr + mapOffset
 			; slow, but write the exact address each time with a inc-1 to be able to write the 2 byte field
@@ -638,7 +726,7 @@ main {
 			cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
 			cx16.VERA_DATA0 = @(cpuptr)
 			cx16.VERA_DATA0 = 0
-			dr = (dr+1) % screen_map_height
+			dr = (dr+1) % view_map_size
 		}
 
 		cols_loaded[lsb(dest_col)] = lsb(src_col)
@@ -647,17 +735,16 @@ main {
 
 	sub verify() -> bool {
 		; check tiles in view against tiles that should be loaded
-		uword mapbaseptr = mapBaseAddr
 		bool ret = true
 		
-		cx16.VERA_ADDR_L =lsb(mapbaseptr) 
-		cx16.VERA_ADDR_M = msb(mapbaseptr)
+		cx16.VERA_ADDR_L =lsb(mapBaseAddr) 
+		cx16.VERA_ADDR_M = msb(mapBaseAddr)
 		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
 
 		ubyte x
 		ubyte y
-		for y in 0 to screen_map_height-1 {
-			for x in 0 to screen_map_width-1 {
+		for y in 0 to view_map_size-1 {
+			for x in 0 to view_map_size-1 {
 				ubyte A = cx16.VERA_DATA0
 				ubyte B = cx16.VERA_DATA0
 				uword cpuaddr = $A000 + cols_loaded[x] + rows_loaded[y] * map_width_tilesw
@@ -690,7 +777,7 @@ main {
 
 		ubyte i
 		; TODO make this more efficient - shouldn't be a loop
-		for i in 0 to (screen_map_height-1) {
+		for i in 0 to (view_map_size-1) {
 			if rows_loaded[i] < low_row_value {
 				low_row_value = rows_loaded[i]
 				low_row_index = i
@@ -706,7 +793,7 @@ main {
 		ubyte hi_col_value = 0
 		ubyte i
 		; TODO make this more efficient - shouldn't be a loop
-		for i in 0 to screen_map_width-1 {
+		for i in 0 to view_map_size-1 {
 			if cols_loaded[i] < low_col_value {
 				low_col_value = cols_loaded[i]
 				low_col_index = i
@@ -732,7 +819,7 @@ main {
 			; in view
 			ubyte i 
 			; TODO make this more efficient - shouldn't be a loop
-			for i in 0 to screen_map_width-1 {
+			for i in 0 to view_map_size-1 {
 				if cols_loaded[i] == real_tx {
 					view_tx = i
 					break
@@ -747,7 +834,7 @@ main {
 			; in view
 			ubyte i 
 			; TODO make this more efficient - shouldn't be a loop
-			for i in 0 to screen_map_height-1 {
+			for i in 0 to view_map_size-1 {
 				if rows_loaded[i] == real_ty {
 					view_ty = i
 					break
@@ -761,14 +848,14 @@ main {
 		ubyte view_tx
 		uword view_px = screen_offset_px + screen_px
 		view_tx = lsb(view_px >> 4)
-		view_tx %= screen_map_width
+		view_tx %= view_map_size
 		return view_tx
 	}
 	sub screen_pos_to_view_ty(uword screen_py) -> ubyte {
 		ubyte view_ty
 		uword view_py = screen_offset_py + screen_py 
 		view_ty = lsb(view_py >> 4)
-		view_ty %= screen_map_height
+		view_ty %= view_map_size
 		return view_ty
 	}
 	sub screen_pos_to_real_tx(uword screen_px) -> ubyte {
@@ -793,6 +880,17 @@ main {
 		val &= $FFF 		; 12 bit register
 		cx16.VERA_L0_HSCROLL_L = lsb(val)
 		cx16.VERA_L0_HSCROLL_H = msb(val)
+	}
+
+;============================================================
+; Tile checking
+;============================================================
+
+	sub is_tile_land(uword tx, uword ty) -> bool
+	{
+		uword cpuptr = $A000 + ty * map_width_tilesw + tx
+		if @(cpuptr) > 0 return true
+		return false
 	}
 
 ;============================================================
