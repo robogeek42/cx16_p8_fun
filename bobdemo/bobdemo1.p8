@@ -513,6 +513,9 @@ main {
 		}
 
 		; load the unified palette
+		;   0 = terrain (tr 01->13)
+		;   1 = terrain extras (tr 14-16)
+		;   2 = facbob
 		void diskio.vload_raw( "palette.bin", palBaseBank, palBaseAddr )
 
 	}
@@ -565,7 +568,7 @@ main {
 		cx16.VERA_DATA0 = lsb(bob_screen_pos_py) ; Y
 		cx16.VERA_DATA0 = msb(bob_screen_pos_py)
 		cx16.VERA_DATA0 = FLIP | (ZDEPTH<<2)
-		cx16.VERA_DATA0 = %01010001 ; 16x16, use palette offset 1
+		cx16.VERA_DATA0 = %01010010 ; 16x16, use palette offset 2
 
 		; turn on sprites
 		cx16.VERA_DC_VIDEO |= %01000000
@@ -629,8 +632,10 @@ main {
 		for y in 0 to view_map_size-1 {
 			uword cpuptr = $A000 + cpuoffset
 			for x in 0 to view_map_size-1 {
+				ubyte paloff = 0
+				if @(cpuptr) > 12 paloff = 1
 				cx16.VERA_DATA0 = @(cpuptr)
-				cx16.VERA_DATA0 = 0
+				cx16.VERA_DATA0 = 0 | paloff << 4
 				cpuptr += 1
 				
 			}
@@ -644,35 +649,6 @@ main {
 		update_low_hi_col_index()
 	}
 
-	sub load_map() {
-		if map_data_loaded==false {
-			load_map_raw()
-		}
-		; load the screen portion of the map with map data
-		ubyte x
-		ubyte y
-		uword cpuptr = $A000 
-		; VERA load 
-		cx16.VERA_ADDR_L =lsb(mapBaseAddr) 
-		cx16.VERA_ADDR_M = msb(mapBaseAddr)
-		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
-		for y in 0 to view_map_size-1 {
-			uword yw = y as uword
-			cpuptr = $A000 + yw * map_width_tilesw
-			for x in 0 to view_map_size-1 {
-				cx16.VERA_DATA0 = @(cpuptr)
-				cx16.VERA_DATA0 = 0
-				cpuptr += 1
-			}
-			rows_loaded[y] = y
-		}
-		update_low_hi_row_index()
-		for x in 0 to view_map_size-1 {
-			cols_loaded[x] = x
-		}
-		update_low_hi_col_index()
-	}
-	
 	sub load_map_row(uword src_row, uword dest_row) {
 
 		ubyte x
@@ -685,8 +661,10 @@ main {
 		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
 		for x in 0 to view_map_size-1 {
 			uword cpuptr = $A000 + src_row * map_width_tilesw + cols_loaded[lsb(dc)]
+			ubyte paloff = 0
+			if @(cpuptr) > 12 paloff = 1
 			cx16.VERA_DATA0 = @(cpuptr)
-			cx16.VERA_DATA0 = 0
+			cx16.VERA_DATA0 = 0 | paloff << 4
 
 			; keep track of the map offset, even though it will be auto incremented
 			mapOffset+=2
@@ -720,12 +698,15 @@ main {
 				mapOffset -= view_map_size_bytesw
 			}
 			mapbaseptr = mapBaseAddr + mapOffset
+
+			ubyte paloff = 0
+			if @(cpuptr) > 12 paloff = 1
 			; slow, but write the exact address each time with a inc-1 to be able to write the 2 byte field
 			cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 			cx16.VERA_ADDR_M = msb(mapbaseptr)
 			cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
 			cx16.VERA_DATA0 = @(cpuptr)
-			cx16.VERA_DATA0 = 0
+			cx16.VERA_DATA0 = 0 | paloff << 4
 			dr = (dr+1) % view_map_size
 		}
 
