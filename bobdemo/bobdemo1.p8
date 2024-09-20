@@ -499,9 +499,58 @@ main {
 		str filename = " "*20
 
 		; terrain tiles: 16x16 in 4bpp so size is 128b
-
+		
+		; basic terrain
 		for n in 0 to 15 {
 			gen_filename( filename, "tr", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128
+		}
+		; terrain feature on grass
+		for n in 0 to 14 {
+			gen_filename( filename, "gtf", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128
+		}
+		; terrain feature on desert
+		for n in 0 to 14 {
+			gen_filename( filename, "dtf", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128
+		}
+		; terrain feature on mud
+		for n in 0 to 14 {
+			gen_filename( filename, "mtf", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128
+		}
+		; terrain feature on snow
+		for n in 0 to 14 {
+			gen_filename( filename, "stf", ".bin", n+1 )
 			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
 			if ret == false {
 				restore_vera()
@@ -596,23 +645,50 @@ main {
 	sub load_map_raw() {
 		; Load the raw map to CPU ram
 		; CX16 has 512 KB of banked RAM 
-		; a 64x64 map is 4k - a single (window ino a) bank can contain 8k
-		; for now just store this data into bank 1
+		; a 64x64 map is 4k - a single (window into a) bank can contain 8k
+		; use cx16.rambank() to switch banks 
 
-		cx16.rambank(1) 
 		;void  diskio.load_raw("map64.dat", $A000)
-		void  diskio.load_raw("map64res.dat", $A000)
-		map_width_tiles = 64
-		map_height_tiles = 64
+		;void  diskio.load_raw("map64res.dat", $A000)
+		;map_width_tiles = 64
+		;map_height_tiles = 64
+		;void  diskio.load_raw("m5res.dat", $A000) ; this map doesn't need resources on snow
+		;map_width_tiles = 60
+		;map_height_tiles = 60
+		void  diskio.load_raw("m4mod.dat", $A000)
+		map_width_tiles = 120
+		map_height_tiles = 120
+
 		map_width_tilesw = map_width_tiles as uword
 		map_height_tilesw = map_height_tiles as uword
 		map_data_loaded = true
-		uword ptr 
+		uword cpuptr 
+		uword cpuoffset 
 
-		; remove overlay for now
-		for ptr in $A000 to $A000 + 64*64-1 {
-			@(ptr) = @(ptr) & $F
+		; translate feature overlays into tiles
+		for cpuoffset in 0 to map_width_tilesw*map_height_tilesw-1 {
+			cpuptr = $A000 + (cpuoffset % $2000)
+			ubyte terr = @(cpuptr) & $0F
+			ubyte feat = @(cpuptr) >> 4
+			cx16.rambank( lsb((cpuoffset / $2000) + 1) )
+			ubyte t = 0
+			if terr > 0 and terr <= 12 {
+				t = ((terr + 3) >> 2) - 1
+			}
+			if terr == 15 {
+				t = 3
+			}
+			if feat > 0 {
+				@(cpuptr) = 16 + t * 15 + feat - 1
+			}
 		}
+	}
+
+	sub get_palette(ubyte val) -> ubyte {
+		ubyte pal = 0
+		if val > 12 and val < 16 pal = 1 ; pavement, lake and snow is palette=1
+		if val >= 16+(3*15) pal = 1 ; snow with feature is also palette 1
+		return pal
 	}
 
 	sub load_map_offset(uword src_col, uword src_row) {
@@ -630,10 +706,11 @@ main {
 		cx16.VERA_ADDR_M = msb(mapBaseAddr)
 		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
 		for y in 0 to view_map_size-1 {
-			uword cpuptr = $A000 + cpuoffset
+			uword cpuptr = $A000 + (cpuoffset % $2000)
 			for x in 0 to view_map_size-1 {
-				ubyte paloff = 0
-				if @(cpuptr) > 12 paloff = 1
+				ubyte paloff = get_palette( @(cpuptr) )
+
+				cx16.rambank( lsb((cpuoffset / $2000) + 1) )
 				cx16.VERA_DATA0 = @(cpuptr)
 				cx16.VERA_DATA0 = 0 | paloff << 4
 				cpuptr += 1
@@ -660,9 +737,12 @@ main {
 		cx16.VERA_ADDR_M = msb(mapbaseptr)
 		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
 		for x in 0 to view_map_size-1 {
-			uword cpuptr = $A000 + src_row * map_width_tilesw + cols_loaded[lsb(dc)]
-			ubyte paloff = 0
-			if @(cpuptr) > 12 paloff = 1
+			uword cpuoffset = src_row * map_width_tilesw + cols_loaded[lsb(dc)]
+			uword cpuptr = $A000 + (cpuoffset % $2000)
+			cx16.rambank( lsb((cpuoffset / $2000) + 1) )
+
+			ubyte paloff = get_palette( @(cpuptr) )
+
 			cx16.VERA_DATA0 = @(cpuptr)
 			cx16.VERA_DATA0 = 0 | paloff << 4
 
@@ -692,15 +772,17 @@ main {
 		; VERA load 
 		ubyte y
 		for y in 0 to view_map_size-1 {
-			uword cpuptr = $A000 + rows_loaded[lsb(dr)] * map_width_tilesw + src_col
+			uword cpuoffset = rows_loaded[lsb(dr)] * map_width_tilesw + src_col
+			uword cpuptr = $A000 + (cpuoffset % $2000)
+			cx16.rambank( lsb((cpuoffset / $2000) + 1) )
 			uword mapOffset = (dr * view_map_sizew + dest_col)*2
 			if mapOffset > view_map_size_bytesw {
 				mapOffset -= view_map_size_bytesw
 			}
 			mapbaseptr = mapBaseAddr + mapOffset
 
-			ubyte paloff = 0
-			if @(cpuptr) > 12 paloff = 1
+			ubyte paloff = get_palette( @(cpuptr) )
+
 			; slow, but write the exact address each time with a inc-1 to be able to write the 2 byte field
 			cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 			cx16.VERA_ADDR_M = msb(mapbaseptr)
@@ -728,8 +810,10 @@ main {
 			for x in 0 to view_map_size-1 {
 				ubyte A = cx16.VERA_DATA0
 				ubyte B = cx16.VERA_DATA0
-				uword cpuaddr = $A000 + cols_loaded[x] + rows_loaded[y] * map_width_tilesw
-				ubyte C = @(cpuaddr)
+				uword cpuoffset = cols_loaded[x] + rows_loaded[y] * map_width_tilesw
+				uword cpuptr = $A000 + (cpuoffset % $2000)
+				cx16.rambank( lsb((cpuoffset / $2000) + 1) )
+				ubyte C = @(cpuptr)
 				if A != C or B != 0 {
 					emudbg.console_write("e (")
 					emudbg.console_write(conv.str_ub(x))
@@ -869,8 +953,10 @@ main {
 
 	sub is_tile_land(uword tx, uword ty) -> bool
 	{
-		uword cpuptr = $A000 + ty * map_width_tilesw + tx
-		if @(cpuptr) > 0 return true
+		uword cpuoffset = ty * map_width_tilesw + tx
+		uword cpuptr = $A000 + (cpuoffset % $2000)
+		cx16.rambank( lsb((cpuoffset / $2000) + 1) )
+		if @(cpuptr) > 0 and @(cpuptr) <16 and @(cpuptr) != 14 return true
 		return false
 	}
 
