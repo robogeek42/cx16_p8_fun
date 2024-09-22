@@ -20,7 +20,8 @@ main {
 
 	; new map:
 	; sprites $13000 -> $16FFF : 16k
-	; map     $17000 -> $1AFFF : 16k
+	; map0    $17000 -> $18FFF : 16k  ; 64x64 is 8k
+	; map1    $19000 -> $1AFFF : 16k  ; 64x64 is 8k
 	; tiles   $1B000 -> $1EFFF : 16k
 
 	; revised to keep standard layers from $1B000 untouched
@@ -30,12 +31,20 @@ main {
 	
 	const ubyte spriteBaseBank = 1
 	const uword spriteBaseAddr = $3000
-	const ubyte tileBaseBank = 1
-	const uword tileBaseAddr = $B000
-	ubyte tileBase16_11 = 0
-	const ubyte mapBaseBank = 1
-	const uword mapBaseAddr = $7000
-	ubyte mapBase16_9 = 0
+
+	const ubyte tile0BaseBank = 1
+	const uword tile0BaseAddr = $B000
+	ubyte tile0Base16_11 = 0
+	const ubyte tile1BaseBank = 1
+	const uword tile1BaseAddr = $D000
+	ubyte tile1Base16_11 = 0
+
+	const ubyte map0BaseBank = 1
+	const uword map0BaseAddr = $7000
+	ubyte map0Base16_9 = 0
+	const ubyte map1BaseBank = 1
+	const uword map1BaseAddr = $9000
+	ubyte map1Base16_9 = 0
 
 	const ubyte palBaseBank = 1
 	const uword palBaseAddr = $FA00
@@ -101,20 +110,25 @@ main {
 ; SCREEN SETUP FOR 4BPP
 ;============================================================
 	sub setup_screen() {
-        tileBase16_11 = (tileBaseBank<<5) | (tileBaseAddr>>11)
-		mapBase16_9 = (mapBaseBank<<7) | (mapBaseAddr>>9)
+        tile0Base16_11 = (tile0BaseBank<<5) | (tile0BaseAddr>>11)
+        tile1Base16_11 = (tile1BaseBank<<5) | (tile1BaseAddr>>11)
+		map0Base16_9 = (map0BaseBank<<7) | (map0BaseAddr>>9)
+		map1Base16_9 = (map1BaseBank<<7) | (map1BaseAddr>>9)
 	
 		save_vera()
 
         ; enable 320*240  8bpp tile-mode
         cx16.VERA_CTRL=0
-        cx16.VERA_DC_VIDEO = (cx16.VERA_DC_VIDEO & %11001111) | %00010000      ; enable only layer 0
+        cx16.VERA_DC_VIDEO = (cx16.VERA_DC_VIDEO & %11001111) | %00110000      ; enable both layers
         cx16.VERA_DC_HSCALE = 64
         cx16.VERA_DC_VSCALE = 64
         ;cx16.VERA_L0_CONFIG = %01010010 ; map h/w (0,0) = 64x64, color depth (10) = 4bpp, 256c should be off to use pallete
         cx16.VERA_L0_CONFIG = %00000010 ; map h/w (0,0) = 32x32, color depth (10) = 4bpp, 256c off
-        cx16.VERA_L0_MAPBASE = mapBase16_9
-        cx16.VERA_L0_TILEBASE = tileBase16_11<<2 | %11 ; tile size 16x16
+        cx16.VERA_L0_MAPBASE = map0Base16_9
+        cx16.VERA_L0_TILEBASE = tile0Base16_11<<2 | %11 ; tile size 16x16
+        cx16.VERA_L1_CONFIG = %00000010 ; map h/w (0,0) = 32x32, color depth (10) = 4bpp, 256c off
+        cx16.VERA_L1_MAPBASE = map1Base16_9
+        cx16.VERA_L1_TILEBASE = tile1Base16_11<<2 | %11 ; tile size 16x16
 	}
 
 ;============================================================
@@ -142,11 +156,15 @@ main {
 		load_off_ty -= (bob_screen_pos_py >>4)
 
 		load_map_offset(load_off_tx, load_off_ty)
+		clear_layer1()
+		init_machines()
+		add_machine(1,28,28)
+		add_machine(16,29,28)
 
 		bob_px = (load_off_tx << 4) + bob_screen_pos_px
 		bob_py = (load_off_ty << 4) + bob_screen_pos_py
 		bob_anim(0, 0)
-		
+	
         sys.set_irqd()
         uword old_keyhdl = cx16.KEYHDL
         cx16.KEYHDL = &keyboard_handler
@@ -287,6 +305,8 @@ main {
 				emudbg.console_write(conv.str_uw(bob_screen_pos_py))
 				emudbg.console_write("    \n")
 			}
+
+
 		} until (main_exit == true)
 
         sys.set_irqd()
@@ -491,19 +511,29 @@ main {
 ;============================================================
 ; LOAD TILES, SPRITES
 ;============================================================
+
+uword tiles_feature_start
+uword tiles_machine_start
+uword tiles_machine_miner
+uword tiles_machine_furnace
+uword tiles_machine_assembler
+
 	sub load_tiles() {
 
 		ubyte n
 		bool ret
-		uword tbaddr = tileBaseAddr ; tileBaseAddr is a constant
+		uword tbaddr = tile0BaseAddr ; tile0BaseAddr is a constant
+		ubyte bank = tile0BaseBank
 		str filename = " "*20
 
 		; terrain tiles: 16x16 in 4bpp so size is 128b
 		
+		; 16 + 3*15 = 61 tiles in tile set 1 so < 8k at 4bpp
+
 		; basic terrain
 		for n in 0 to 15 {
 			gen_filename( filename, "tr", ".bin", n+1 )
-			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
 			if ret == false {
 				restore_vera()
 				txt.print("error loading ")
@@ -512,10 +542,12 @@ main {
 			}
 			tbaddr += 128
 		}
+
+		tiles_feature_start = tbaddr
 		; terrain feature on grass
 		for n in 0 to 14 {
 			gen_filename( filename, "gtf", ".bin", n+1 )
-			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
 			if ret == false {
 				restore_vera()
 				txt.print("error loading ")
@@ -527,7 +559,7 @@ main {
 		; terrain feature on desert
 		for n in 0 to 14 {
 			gen_filename( filename, "dtf", ".bin", n+1 )
-			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
 			if ret == false {
 				restore_vera()
 				txt.print("error loading ")
@@ -539,7 +571,7 @@ main {
 		; terrain feature on mud
 		for n in 0 to 14 {
 			gen_filename( filename, "mtf", ".bin", n+1 )
-			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
 			if ret == false {
 				restore_vera()
 				txt.print("error loading ")
@@ -548,10 +580,30 @@ main {
 			}
 			tbaddr += 128
 		}
-		; terrain feature on snow
-		for n in 0 to 14 {
-			gen_filename( filename, "stf", ".bin", n+1 )
-			ret =  diskio.vload_raw(filename, tileBaseBank, tbaddr)
+
+		; second tileset
+		; start at next 8k boundary
+		; have 1 + 12*3 tiles
+
+		tbaddr = tile1BaseAddr 
+		bank = tile1BaseBank
+
+		; blank
+		filename = "blank.bin"
+		ret =  diskio.vload_raw(filename, bank, tbaddr)
+		if ret == false {
+			restore_vera()
+			txt.print("error loading ")
+			txt.print( filename )
+			return
+		}
+		tbaddr += 128
+
+		tiles_machine_start = tbaddr
+		tiles_machine_furnace = tbaddr
+		for n in 0 to 11 {
+			gen_filename( filename, "fur", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
 			if ret == false {
 				restore_vera()
 				txt.print("error loading ")
@@ -560,6 +612,35 @@ main {
 			}
 			tbaddr += 128
 		}
+		tiles_machine_assembler = tbaddr
+		for n in 0 to 11 {
+			gen_filename( filename, "asmb", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128
+		}
+
+		
+		tiles_machine_miner = tbaddr
+
+		for n in 0 to 2 {
+			gen_filename( filename, "mineru", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128
+		}
+	
+
 
 		; load the unified palette
 		;   0 = terrain (tr 01->13)
@@ -652,12 +733,12 @@ main {
 		;void  diskio.load_raw("map64res.dat", $A000)
 		;map_width_tiles = 64
 		;map_height_tiles = 64
-		;void  diskio.load_raw("m5res.dat", $A000) ; this map doesn't need resources on snow
-		;map_width_tiles = 60
-		;map_height_tiles = 60
-		void  diskio.load_raw("m4mod.dat", $A000)
-		map_width_tiles = 120
-		map_height_tiles = 120
+		void  diskio.load_raw("m5res.dat", $A000) ; this map doesn't need resources on snow
+		map_width_tiles = 60
+		map_height_tiles = 60
+		;void  diskio.load_raw("m4mod.dat", $A000)
+		;map_width_tiles = 120
+		;map_height_tiles = 120
 
 		map_width_tilesw = map_width_tiles as uword
 		map_height_tilesw = map_height_tiles as uword
@@ -690,6 +771,11 @@ main {
 		if val >= 16+(3*15) pal = 1 ; snow with feature is also palette 1
 		return pal
 	}
+	sub get_palette_l1(ubyte val) -> ubyte {
+		ubyte pal = 3
+		if val > 12 pal = 4
+		return pal
+	}
 
 	sub load_map_offset(uword src_col, uword src_row) {
 		if map_data_loaded==false {
@@ -702,9 +788,9 @@ main {
 		uword cpuoffset = src_row * map_width_tilesw + src_col
 
 		; VERA load 
-		cx16.VERA_ADDR_L =lsb(mapBaseAddr) 
-		cx16.VERA_ADDR_M = msb(mapBaseAddr)
-		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
+		cx16.VERA_ADDR_L =lsb(map0BaseAddr) 
+		cx16.VERA_ADDR_M = msb(map0BaseAddr)
+		cx16.VERA_ADDR_H = map0BaseBank | %00010000     ; bank=1, increment 1
 		for y in 0 to view_map_size-1 {
 			uword cpuptr = $A000 + (cpuoffset % $2000)
 			for x in 0 to view_map_size-1 {
@@ -726,16 +812,27 @@ main {
 		update_low_hi_col_index()
 	}
 
+	sub clear_layer1() {
+		cx16.VERA_ADDR_L =lsb(map1BaseAddr) 
+		cx16.VERA_ADDR_M = msb(map1BaseAddr)
+		cx16.VERA_ADDR_H = map1BaseBank | %00010000     ; bank=1, increment 1
+		uword i
+		for i in 0 to view_map_size * view_map_size - 1 {
+			cx16.VERA_DATA0 = 0 ; tile 0 is blank (see-through)
+			cx16.VERA_DATA0 = 0
+		}
+	}
+
 	sub load_map_row(uword src_row, uword dest_row) {
 
 		ubyte x
 		uword mapOffset = (dest_row * view_map_sizew + 0)*2
-		uword mapbaseptr = mapBaseAddr + mapOffset
+		uword mapbaseptr = map0BaseAddr + mapOffset
 		uword dc = 0
 		; VERA load 
 		cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 		cx16.VERA_ADDR_M = msb(mapbaseptr)
-		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
+		cx16.VERA_ADDR_H = map0BaseBank | %00010000     ; bank=1, increment 1
 		for x in 0 to view_map_size-1 {
 			uword cpuoffset = src_row * map_width_tilesw + cols_loaded[lsb(dc)]
 			uword cpuptr = $A000 + (cpuoffset % $2000)
@@ -753,10 +850,10 @@ main {
 			if mapOffset > view_map_size_bytesw {
 				; if so, wrap the address
 				mapOffset -= view_map_size_bytesw
-				mapbaseptr = mapBaseAddr + mapOffset
+				mapbaseptr = map0BaseAddr + mapOffset
 				cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 				cx16.VERA_ADDR_M = msb(mapbaseptr)
-				cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
+				cx16.VERA_ADDR_H = map0BaseBank | %00010000     ; bank=1, increment 1
 			}
 
 			; increment the column index so we can look up what column needs to be read from main map
@@ -779,14 +876,14 @@ main {
 			if mapOffset > view_map_size_bytesw {
 				mapOffset -= view_map_size_bytesw
 			}
-			mapbaseptr = mapBaseAddr + mapOffset
+			mapbaseptr = map0BaseAddr + mapOffset
 
 			ubyte paloff = get_palette( @(cpuptr) )
 
 			; slow, but write the exact address each time with a inc-1 to be able to write the 2 byte field
 			cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 			cx16.VERA_ADDR_M = msb(mapbaseptr)
-			cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
+			cx16.VERA_ADDR_H = map0BaseBank | %00010000     ; bank=1, increment 1
 			cx16.VERA_DATA0 = @(cpuptr)
 			cx16.VERA_DATA0 = 0 | paloff << 4
 			dr = (dr+1) % view_map_size
@@ -800,9 +897,9 @@ main {
 		; check tiles in view against tiles that should be loaded
 		bool ret = true
 		
-		cx16.VERA_ADDR_L =lsb(mapBaseAddr) 
-		cx16.VERA_ADDR_M = msb(mapBaseAddr)
-		cx16.VERA_ADDR_H = mapBaseBank | %00010000     ; bank=1, increment 1
+		cx16.VERA_ADDR_L =lsb(map0BaseAddr) 
+		cx16.VERA_ADDR_M = msb(map0BaseAddr)
+		cx16.VERA_ADDR_H = map0BaseBank | %00010000     ; bank=1, increment 1
 
 		ubyte x
 		ubyte y
@@ -940,11 +1037,15 @@ main {
 		val &= $FFF 		; 12 bit register
 		cx16.VERA_L0_VSCROLL_L = lsb(val)
 		cx16.VERA_L0_VSCROLL_H = msb(val)
+		cx16.VERA_L1_VSCROLL_L = lsb(val)
+		cx16.VERA_L1_VSCROLL_H = msb(val)
 	}
 	sub update_vera_hscroll(uword val) {
 		val &= $FFF 		; 12 bit register
 		cx16.VERA_L0_HSCROLL_L = lsb(val)
 		cx16.VERA_L0_HSCROLL_H = msb(val)
+		cx16.VERA_L1_HSCROLL_L = lsb(val)
+		cx16.VERA_L1_HSCROLL_H = msb(val)
 	}
 
 ;============================================================
@@ -959,6 +1060,58 @@ main {
 		if @(cpuptr) > 0 and @(cpuptr) <16 and @(cpuptr) != 14 return true
 		return false
 	}
+
+;============================================================
+; Machines
+;============================================================
+
+	; machine_data 
+	;	ubyte type  ; machine type 255=empty, 0=furnace, 1=assembler, 2=miner
+	;	ubyte dir	; 0=u, 1=r, 2=d, 3=l
+	;	ubyte tx	; tile
+	;	ubyte ty	; tile
+
+	ubyte[256] mach_data ; space for 64 machines
+
+	sub init_machines()
+	{
+		ubyte m
+		for m in 0 to 63 {
+			uword machp = &mach_data[m*4]
+			machp[0] = 255
+			machp[1] = 0
+			machp[2] = 0
+		}
+	}
+
+	sub find_free_mach_data_slot() -> ubyte {
+		ubyte i
+		for i in 0 to 255 step 4 {
+			if mach_data[i] == 255 return i
+		}
+		return 255
+	}
+	sub add_machine(ubyte type, ubyte tx, ubyte ty)
+	{
+		ubyte slot = find_free_mach_data_slot()
+
+		uword machp = &mach_data[slot]
+		machp[0] = type
+		machp[1] = tx
+		machp[2] = ty
+
+		uword mapoffset = (ty * view_map_sizew + tx) << 1
+		uword mapbaseptr = map1BaseAddr + mapoffset
+
+		cx16.VERA_ADDR_L =lsb(mapbaseptr) 
+		cx16.VERA_ADDR_M = msb(mapbaseptr)
+		cx16.VERA_ADDR_H = map1BaseBank | %00010000     ; bank=1, increment 1
+		
+		ubyte paloff = get_palette_l1( type )
+		cx16.VERA_DATA0 = type
+		cx16.VERA_DATA0 = 0 | paloff << 4
+	}
+
 
 ;============================================================
 ; END OF main()
