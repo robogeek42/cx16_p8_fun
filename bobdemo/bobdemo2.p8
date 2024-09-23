@@ -32,6 +32,11 @@ main {
 	const uword palBaseAddr = $FA00
 	; sprite data is $1FC00 to $1FFFF, 1k = 128 sprites, 8bytes each
 
+	; CPU Memory map
+	const uword bankedRAM = $A000   ; 8k window into banked memory
+	const ubyte map0rambank  = 1		; 16k for 128x128 so 2 banks
+	const ubyte map1rambank  = 3		; 16k for 128x128 so 2 banks
+
 	ubyte key_bits0 = 0
 	const ubyte KEY_BITS_W   = $01
 	const ubyte KEY_MASK_W   = $FE
@@ -155,10 +160,37 @@ main {
 		uword load_off_ty = map_height_tilesw >> 1
 		load_off_ty -= (bob_screen_pos_py >>4)
 
+		init_machines()
+
+		; test loop1
+		add_belt(2,1, 54,55)
+		add_belt(3,1, 55,55)
+		add_belt(3,1, 56,55)
+		add_belt(3,2, 57,55)
+		add_belt(0,2, 57,56)
+		add_belt(0,3, 57,57)
+		add_belt(1,3, 56,57)
+		add_belt(1,3, 55,57)
+		add_belt(1,0, 54,57)
+		add_belt(2,0, 54,56)
+
+		; test loop 2
+		add_belt(1,2, 64,55)
+		add_belt(1,3, 65,55)
+		add_belt(1,3, 66,55)
+		add_belt(2,3, 67,55)
+		add_belt(2,0, 67,56)
+		add_belt(3,0, 67,57)
+		add_belt(3,1, 66,57)
+		add_belt(3,1, 65,57)
+		add_belt(0,1, 64,57)
+		add_belt(0,2, 64,56)
+
+		add_machine(1,0, 56,62)
+		add_machine(2,1, 58,62)
+		add_machine(3,2, 60,62)
+
 		load_map_offset(load_off_tx, load_off_ty)
-		;init_machines()
-		;add_machine(1,28,28)
-		;add_machine(16,29,28)
 
 		bob_px = (load_off_tx << 4) + bob_screen_pos_px
 		bob_py = (load_off_ty << 4) + bob_screen_pos_py
@@ -175,6 +207,15 @@ main {
 
 		const uword key_delay = 2
 		uword key_time = cbm.RDTIM16() + key_delay
+
+		uword belt_anim_time = cbm.RDTIM16()
+		const uword belt_anim_rate = 6 ; in jiffies
+		cycle_belt_palette()
+
+		uword mach_anim_time = cbm.RDTIM16()
+		const uword mach_anim_rate = 6 ; in jiffies
+		cycle_mach_palette()
+
 
 		;============================================================
 		; GAME LOOP
@@ -337,6 +378,16 @@ main {
 				show_cursor(0)
 			}
 
+			if belt_anim_time < cbm.RDTIM16() 
+			{
+				belt_anim_time = cbm.RDTIM16() + belt_anim_rate
+				cycle_belt_palette()
+			}
+			if mach_anim_time < cbm.RDTIM16() 
+			{
+				mach_anim_time = cbm.RDTIM16() + mach_anim_rate
+				cycle_mach_palette()
+			}
 
 		} until (main_exit == true)
 
@@ -553,11 +604,13 @@ main {
 ; LOAD TILES, SPRITES
 ;============================================================
 
-uword tiles_feature_start
-uword tiles_machine_start
-uword tiles_machine_miner
-uword tiles_machine_furnace
-uword tiles_machine_assembler
+ubyte tiles_feature_start
+ubyte tiles_belts_start
+ubyte tiles_bbelts_start
+ubyte tiles_machine_start 
+ubyte tiles_machine_miner
+ubyte tiles_machine_furnace
+ubyte tiles_machine_assembler
 
 	sub load_tiles() {
 
@@ -588,6 +641,7 @@ uword tiles_machine_assembler
 
 		tbaddr = tile1BaseAddr 
 		bank = tile1BaseBank
+		ubyte id = 0
 
 		; blank
 		filename = "blank.bin"
@@ -598,9 +652,10 @@ uword tiles_machine_assembler
 			txt.print( filename )
 			return
 		}
-		tbaddr += 128
+		tbaddr += 128 
+		id++
 
-		tiles_feature_start = tbaddr
+		tiles_feature_start = id
 		; terrain features
 		for n in 0 to 14 {
 			gen_filename( filename, "tf", ".bin", n+1 )
@@ -611,7 +666,77 @@ uword tiles_machine_assembler
 				txt.print( filename )
 				return
 			}
-			tbaddr += 128
+			tbaddr += 128 
+			id++
+		}
+
+		tiles_belts_start = id
+		; belts
+		for n in 0 to 3 {
+			gen_filename( filename, "belt", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128 
+			id++
+		}
+		tiles_bbelts_start = id
+		; bendy belts
+		for n in 0 to 7 {
+			gen_filename( filename, "bbelt", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128 
+			id++
+		}
+
+		tiles_machine_furnace = id
+		for n in 0 to 3 {
+			gen_filename( filename, "fur", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128 
+			id++
+		}
+		tiles_machine_assembler = id
+		for n in 0 to 3 {
+			gen_filename( filename, "asmb", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128 
+			id++
+		}
+		tiles_machine_miner = id
+		for n in 0 to 3 {
+			gen_filename( filename, "miner", ".bin", n+1 )
+			ret =  diskio.vload_raw(filename, bank, tbaddr)
+			if ret == false {
+				restore_vera()
+				txt.print("error loading ")
+				txt.print( filename )
+				return
+			}
+			tbaddr += 128 
+			id++
 		}
 
 		; load the unified palette
@@ -619,6 +744,8 @@ uword tiles_machine_assembler
 		;   1 : Terrain (13 cols)
 		;   2 : FAC Bob
 		;   3 : Features (13 colours)
+		;   4 : Belts
+		;   5 : Assemblers and Furnaces
 
 		void diskio.vload_raw( "palette.bin", palBaseBank, palBaseAddr )
 
@@ -627,6 +754,8 @@ uword tiles_machine_assembler
 	const ubyte PAL_terrain  = 1
 	const ubyte PAL_bob      = 2
 	const ubyte PAL_features = 3
+	const ubyte PAL_belt     = 4
+	const ubyte PAL_fur_asmb = 5
 
 	sub load_sprites() {
 		; BOB tiles: 16x16 in 4bpp so size is 128b
@@ -756,20 +885,35 @@ uword tiles_machine_assembler
 		; a 64x64 map is 4k - a single (window into a) bank can contain 8k
 		; use cx16.rambank() to switch banks 
 
-		;void  diskio.load_raw("map64.dat", $A000)
-		;void  diskio.load_raw("map64res.dat", $A000)
+		cx16.rambank(map0rambank)
+
+		;void  diskio.load_raw("map64.dat", bankedRAM)
+		;void  diskio.load_raw("map64res.dat", bankedRAM)
 		;map_width_tiles = 64
 		;map_height_tiles = 64
-		;void  diskio.load_raw("m5res.dat", $A000) ; this map doesn't need resources on snow
+		;void  diskio.load_raw("m5res.dat", bankedRAM) ; this map doesn't need resources on snow
 		;map_width_tiles = 60
 		;map_height_tiles = 60
-		void  diskio.load_raw("m4mod.dat", $A000)
+
+		void  diskio.load_raw("m4mod.dat", bankedRAM)
 		map_width_tiles = 120
 		map_height_tiles = 120
 
 		map_width_tilesw = map_width_tiles as uword
 		map_height_tilesw = map_height_tiles as uword
 		map_data_loaded = true
+
+		uword cpuoffset = 0
+		uword cpuptr
+		uword x,y
+		for y in 0 to map_height_tilesw -1 {
+			for x in 0 to map_width_tilesw -1 {
+				cx16.rambank( lsb((cpuoffset / $2000) + map1rambank) )
+				cpuptr = bankedRAM + (cpuoffset % $2000)
+				@(cpuptr) = 0
+				cpuoffset++
+			}
+		}
 	}
 
 	sub load_map_offset(uword src_col, uword src_row) {
@@ -780,20 +924,20 @@ uword tiles_machine_assembler
 		; load the screen portion of the map with map data
 		ubyte x
 		ubyte y
+		ubyte paloff
 		uword cpuoffset = src_row * map_width_tilesw + src_col
 		uword cpuptr
-		ubyte paloff
 
 		; VERA load  - terrain into Layer 0
 		cx16.VERA_ADDR_L =lsb(map0BaseAddr) 
 		cx16.VERA_ADDR_M = msb(map0BaseAddr)
 		cx16.VERA_ADDR_H = map0BaseBank | %00010000     ; increment 1
 		for y in 0 to view_map_size-1 {
-			cpuptr = $A000 + (cpuoffset % $2000)
+			cpuptr = bankedRAM + (cpuoffset % $2000)
 			for x in 0 to view_map_size-1 {
 				paloff = PAL_terrain
 
-				cx16.rambank( lsb((cpuoffset / $2000) + 1) )
+				cx16.rambank( lsb((cpuoffset / $2000) + map0rambank) )
 				cx16.VERA_DATA0 = @(cpuptr) & $0F
 				cx16.VERA_DATA0 = 0 | paloff << 4
 				cpuptr += 1
@@ -804,18 +948,26 @@ uword tiles_machine_assembler
 		}
 
 		cpuoffset = src_row * map_width_tilesw + src_col
+
 		; VERA load  - features into layer 1
 		cx16.VERA_ADDR_L =lsb(map1BaseAddr) 
 		cx16.VERA_ADDR_M = msb(map1BaseAddr)
 		cx16.VERA_ADDR_H = map1BaseBank | %00010000     ; increment 1
 		for y in 0 to view_map_size-1 {
-			cpuptr = $A000 + (cpuoffset % $2000)
+			cpuptr = bankedRAM + (cpuoffset % $2000)
 			for x in 0 to view_map_size-1 {
+				cx16.rambank( lsb((cpuoffset / $2000) + map0rambank) )
+				ubyte feat = (@(cpuptr) & $F0) >> 4
 				paloff = PAL_features
-
-				cx16.rambank( lsb((cpuoffset / $2000) + 1) )
-				cx16.VERA_DATA0 = (@(cpuptr) & $F0 ) >> 4
+				cx16.rambank( lsb((cpuoffset / $2000) + map1rambank) )
+				if feat == 0 {
+					feat = @(cpuptr)
+					if feat < tiles_machine_furnace paloff = PAL_belt
+					if feat >= tiles_machine_furnace paloff = PAL_fur_asmb
+				}
+				cx16.VERA_DATA0 = feat
 				cx16.VERA_DATA0 = 0 | paloff << 4
+
 				cpuptr += 1
 				
 			}
@@ -835,22 +987,19 @@ uword tiles_machine_assembler
 		uword mapOffset = (dest_row * view_map_sizew + 0)*2
 		uword mapbaseptr = map0BaseAddr + mapOffset
 		uword dc = 0
-		uword cpuoffset
-		uword cpuptr
-		ubyte paloff
+		uword cpuoffset, cpuptr
+		ubyte paloff, feat
 		; VERA load - terrain
 		cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 		cx16.VERA_ADDR_M = msb(mapbaseptr)
 		cx16.VERA_ADDR_H = map0BaseBank | %00010000     ; increment 1
 		for x in 0 to view_map_size-1 {
 			cpuoffset = src_row * map_width_tilesw + cols_loaded[lsb(dc)]
-			cpuptr = $A000 + (cpuoffset % $2000)
-			cx16.rambank( lsb((cpuoffset / $2000) + 1) )
-
-			paloff = PAL_terrain
+			cpuptr = bankedRAM + (cpuoffset % $2000)
+			cx16.rambank( lsb((cpuoffset / $2000) + map0rambank) )
 
 			cx16.VERA_DATA0 = @(cpuptr) & $0F
-			cx16.VERA_DATA0 = 0 | paloff << 4
+			cx16.VERA_DATA0 = 0 | PAL_terrain << 4
 
 			; keep track of the map offset, even though it will be auto incremented
 			mapOffset+=2
@@ -878,12 +1027,19 @@ uword tiles_machine_assembler
 		cx16.VERA_ADDR_H = map1BaseBank | %00010000     ; increment 1
 		for x in 0 to view_map_size-1 {
 			cpuoffset = src_row * map_width_tilesw + cols_loaded[lsb(dc)]
-			cpuptr = $A000 + (cpuoffset % $2000)
-			cx16.rambank( lsb((cpuoffset / $2000) + 1) )
+			cpuptr = bankedRAM + (cpuoffset % $2000)
+			cx16.rambank( lsb((cpuoffset / $2000) + map0rambank) )
 
+			feat = (@(cpuptr) & $F0) >> 4
 			paloff = PAL_features
-
-			cx16.VERA_DATA0 = (@(cpuptr) & $F0) >> 4
+			if feat == 0 {
+				cx16.rambank( lsb((cpuoffset / $2000) + map1rambank) )
+				feat = @(cpuptr)
+				paloff = PAL_belt
+				if feat < tiles_machine_furnace paloff = PAL_belt
+				if feat >= tiles_machine_furnace paloff = PAL_fur_asmb
+			}
+			cx16.VERA_DATA0 = feat
 			cx16.VERA_DATA0 = 0 | paloff << 4
 
 			; keep track of the map offset, even though it will be auto incremented
@@ -910,29 +1066,25 @@ uword tiles_machine_assembler
 		ubyte y
 		uword mapbaseptr =  0
 		uword dr = 0
-		uword cpuoffset
-		uword cpuptr
-		ubyte paloff
-		uword mapOffset
+		uword cpuoffset, cpuptr, mapOffset
+		ubyte paloff, feat
 		; VERA load 
 		for y in 0 to view_map_size-1 {
 			cpuoffset = rows_loaded[lsb(dr)] * map_width_tilesw + src_col
-			cpuptr = $A000 + (cpuoffset % $2000)
-			cx16.rambank( lsb((cpuoffset / $2000) + 1) )
+			cpuptr = bankedRAM + (cpuoffset % $2000)
+			cx16.rambank( lsb((cpuoffset / $2000) + map0rambank) )
 			mapOffset = (dr * view_map_sizew + dest_col)*2
 			if mapOffset > view_map_size_bytesw {
 				mapOffset -= view_map_size_bytesw
 			}
 			mapbaseptr = map0BaseAddr + mapOffset
 
-			paloff = PAL_terrain
-
 			; slow, but write the exact address each time with a inc-1 to be able to write the 2 byte field
 			cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 			cx16.VERA_ADDR_M = msb(mapbaseptr)
 			cx16.VERA_ADDR_H = map0BaseBank | %00010000     ; increment 1
 			cx16.VERA_DATA0 = @(cpuptr) & $0F
-			cx16.VERA_DATA0 = 0 | paloff << 4
+			cx16.VERA_DATA0 = 0 | PAL_terrain << 4
 			dr = (dr+1) % view_map_size
 		}
 		mapbaseptr =  0
@@ -940,22 +1092,31 @@ uword tiles_machine_assembler
 		; VERA load 
 		for y in 0 to view_map_size-1 {
 			cpuoffset = rows_loaded[lsb(dr)] * map_width_tilesw + src_col
-			cpuptr = $A000 + (cpuoffset % $2000)
-			cx16.rambank( lsb((cpuoffset / $2000) + 1) )
+			cpuptr = bankedRAM + (cpuoffset % $2000)
+			cx16.rambank( lsb((cpuoffset / $2000) + map0rambank) )
 			mapOffset = (dr * view_map_sizew + dest_col)*2
 			if mapOffset > view_map_size_bytesw {
 				mapOffset -= view_map_size_bytesw
 			}
 			mapbaseptr = map1BaseAddr + mapOffset
 
-			paloff = PAL_features
-
 			; slow, but write the exact address each time with a inc-1 to be able to write the 2 byte field
 			cx16.VERA_ADDR_L =lsb(mapbaseptr) 
 			cx16.VERA_ADDR_M = msb(mapbaseptr)
+
 			cx16.VERA_ADDR_H = map1BaseBank | %00010000     ; increment 1
-			cx16.VERA_DATA0 = (@(cpuptr) & $F0) >> 4
+			feat = (@(cpuptr) & $F0) >> 4
+			paloff = PAL_features
+			if feat == 0 {
+				cx16.rambank( lsb((cpuoffset / $2000) + map1rambank) )
+				feat = @(cpuptr)
+				paloff = PAL_belt
+				if feat < tiles_machine_furnace paloff = PAL_belt
+				if feat >= tiles_machine_furnace paloff = PAL_fur_asmb
+			}
+			cx16.VERA_DATA0 = feat
 			cx16.VERA_DATA0 = 0 | paloff << 4
+
 			dr = (dr+1) % view_map_size
 		}
 
@@ -1099,14 +1260,14 @@ uword tiles_machine_assembler
 	{
 		bool ret = true
 		uword cpuoffset = ty * map_width_tilesw + tx
-		uword cpuptr = $A000 + (cpuoffset % $2000)
-		cx16.rambank( lsb((cpuoffset / $2000) + 1) )
+		uword cpuptr = bankedRAM + (cpuoffset % $2000)
+		cx16.rambank( lsb((cpuoffset / $2000) + map0rambank) )
 		ubyte terr = @(cpuptr) & $0F
 		ubyte feat = (@(cpuptr) & $F0) >> 4
 		if terr == 0 or terr == 14 ret = false
 		if feat > 0 ret = false
 		
-		return ret
+		return true
 	}
 
 ;============================================================
@@ -1139,27 +1300,90 @@ uword tiles_machine_assembler
 		}
 		return 255
 	}
-	sub add_machine(ubyte type, ubyte tx, ubyte ty)
+
+	;  type = 1 : furnace
+	;  type = 2 : assembler
+	sub add_machine(ubyte type, ubyte dir, ubyte tx, ubyte ty)
 	{
 		ubyte slot = find_free_mach_data_slot()
-
 		uword machp = &mach_data[slot]
-		machp[0] = type
+		
+		ubyte mach_type
+
+		when type {
+			1 -> mach_type = tiles_machine_furnace + dir
+			2 -> mach_type = tiles_machine_assembler + dir
+			3 -> mach_type = tiles_machine_miner + dir
+		}
+
+		machp[0] = mach_type
 		machp[1] = tx
 		machp[2] = ty
 
-		uword mapoffset = (ty * view_map_sizew + tx) << 1
-		uword mapbaseptr = map1BaseAddr + mapoffset
+		uword cpuoffset = ty * map_width_tilesw + tx
+		uword cpuptr = bankedRAM + (cpuoffset % $2000)
+		cx16.rambank( lsb((cpuoffset / $2000) + map1rambank) )
+		@(cpuptr) = mach_type 
+	}
+	;                    0    1    2    3    4    5    6    7    8    9    10   11
+	;ubyte[] belt_dir = [1,3, 2,0, 3,1, 0,2, 1,0, 3,0, 0,1, 0,3, 1,2, 2,1, 2,3, 3,2]
+	ubyte[] belt_dir = [ 255, 6,   3,   7,
+						 4,   255, 8,   0,
+						 1,   9,   255, 10,
+						 5,   2,   11,  255 ]
+	sub add_belt(ubyte fromdir, ubyte todir, ubyte tx, ubyte ty)
+	{
+		if fromdir==todir or fromdir > 3 or todir > 3 return
 
-		cx16.VERA_ADDR_L =lsb(mapbaseptr) 
-		cx16.VERA_ADDR_M = msb(mapbaseptr)
-		cx16.VERA_ADDR_H = map1BaseBank | %00010000     ; increment 1
-		
-		ubyte paloff = PAL_default
-		cx16.VERA_DATA0 = type
-		cx16.VERA_DATA0 = 0 | paloff << 4
+		ubyte slot = find_free_mach_data_slot()
+		uword machp = &mach_data[slot]
+
+		ubyte mach_type = tiles_belts_start + belt_dir[fromdir*4 +todir ]
+
+		machp[0] = mach_type
+		machp[1] = tx
+		machp[2] = ty
+
+		uword cpuoffset = ty * map_width_tilesw + tx
+		uword cpuptr = bankedRAM + (cpuoffset % $2000)
+		cx16.rambank( lsb((cpuoffset / $2000) + map1rambank) )
+		@(cpuptr) = mach_type 
 	}
 
+	ubyte[] colcycle_belt_colindex = [8,9,3,2]
+	ubyte[] colcycle_belt_cols = [$F0,$0F,$A0,$0A,$AA,$0A,$AA,$0A]
+	ubyte colcycle_belt_current = 0
+	sub cycle_belt_palette()
+	{
+		ubyte i
+		for i in 0 to 3 {
+			ubyte index = (i + colcycle_belt_current) % 4
+			ubyte colindex = colcycle_belt_colindex[ index ] 
+			cx16.VERA_ADDR_L = $00 + 2*(16*PAL_belt + colindex)
+			cx16.VERA_ADDR_M = $FA
+			cx16.VERA_ADDR_H = 1 | %00010000     ; bank=1, increment 1
+			cx16.VERA_DATA0 = colcycle_belt_cols[i*2]
+			cx16.VERA_DATA0 = colcycle_belt_cols[i*2+1]
+		}
+		colcycle_belt_current++
+	}
+	ubyte[] colcycle_mach_colindex = [13,15,7]
+	ubyte[] colcycle_mach_cols = [$F0,$0F,$A0,$0A,$AA,$0A,$AA,$0A]
+	ubyte colcycle_mach_current = 0
+	sub cycle_mach_palette()
+	{
+		ubyte i
+		for i in 0 to 2 {
+			ubyte index = (i + colcycle_mach_current) % 4
+			ubyte colindex = colcycle_mach_colindex[ index ] 
+			cx16.VERA_ADDR_L = $00 + 2*(16*PAL_belt + colindex)
+			cx16.VERA_ADDR_M = $FA
+			cx16.VERA_ADDR_H = 1 | %00010000     ; bank=1, increment 1
+			cx16.VERA_DATA0 = colcycle_mach_cols[i*2]
+			cx16.VERA_DATA0 = colcycle_mach_cols[i*2+1]
+		}
+		colcycle_mach_current++
+	}
 
 ;============================================================
 ; END OF main()
