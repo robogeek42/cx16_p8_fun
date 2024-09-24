@@ -388,6 +388,7 @@ main {
 			{
 				mach_anim_time = cbm.RDTIM16() + mach_anim_rate
 				cycle_mach_palette()
+				cycle_miner_palette()
 			}
 
 		} until (main_exit == true)
@@ -758,6 +759,7 @@ ubyte tiles_machine_assembler
 	const ubyte PAL_features = 3
 	const ubyte PAL_belt     = 4
 	const ubyte PAL_fur_asmb = 5
+	const ubyte PAL_miner    = 6
 
 	sub load_sprites() {
 		; BOB tiles: 16x16 in 4bpp so size is 128b
@@ -974,7 +976,8 @@ ubyte tiles_machine_assembler
 				if feat == 0 {
 					feat = @(cpuptr)
 					if feat < tiles_machine_furnace paloff = PAL_belt
-					if feat >= tiles_machine_furnace paloff = PAL_fur_asmb
+					if feat >= tiles_machine_furnace and feat < tiles_machine_miner paloff = PAL_fur_asmb
+					if feat >= tiles_machine_miner paloff = PAL_miner
 				}
 				cx16.VERA_DATA0 = feat
 				cx16.VERA_DATA0 = 0 | paloff << 4
@@ -1048,7 +1051,8 @@ ubyte tiles_machine_assembler
 				feat = @(cpuptr)
 				paloff = PAL_belt
 				if feat < tiles_machine_furnace paloff = PAL_belt
-				if feat >= tiles_machine_furnace paloff = PAL_fur_asmb
+				if feat >= tiles_machine_furnace and feat < tiles_machine_miner paloff = PAL_fur_asmb
+				if feat >= tiles_machine_miner paloff = PAL_miner
 			}
 			cx16.VERA_DATA0 = feat
 			cx16.VERA_DATA0 = 0 | paloff << 4
@@ -1123,7 +1127,8 @@ ubyte tiles_machine_assembler
 				feat = @(cpuptr)
 				paloff = PAL_belt
 				if feat < tiles_machine_furnace paloff = PAL_belt
-				if feat >= tiles_machine_furnace paloff = PAL_fur_asmb
+				if feat >= tiles_machine_furnace and feat < tiles_machine_miner paloff = PAL_fur_asmb
+				if feat >= tiles_machine_miner paloff = PAL_miner
 			}
 			cx16.VERA_DATA0 = feat
 			cx16.VERA_DATA0 = 0 | paloff << 4
@@ -1419,6 +1424,23 @@ ubyte tiles_machine_assembler
 			cx16.VERA_DATA0 = colcycle_mach_cols[i*2+1]
 		}
 		colcycle_mach_current++
+	}
+	ubyte[] colcycle_miner_colindex = [3,2,6]
+	ubyte[] colcycle_miner_cols = [$FF,$0F,$AA,$0A,$55,$05]
+	ubyte colcycle_miner_current = 0
+	sub cycle_miner_palette()
+	{
+		ubyte i
+		for i in 0 to 2 {
+			ubyte index = (i + colcycle_miner_current) % 3
+			ubyte colindex = colcycle_miner_colindex[ index ] 
+			cx16.VERA_ADDR_L = $00 + 2*(16*PAL_miner + colindex)
+			cx16.VERA_ADDR_M = $FA
+			cx16.VERA_ADDR_H = 1 | %00010000     ; bank=1, increment 1
+			cx16.VERA_DATA0 = colcycle_miner_cols[i*2]
+			cx16.VERA_DATA0 = colcycle_miner_cols[i*2+1]
+		}
+		colcycle_miner_current++
 	}
 
 ;============================================================
