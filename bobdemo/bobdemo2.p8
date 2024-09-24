@@ -71,6 +71,7 @@ main {
 
 	const ubyte view_map_size = 32			; size of map enabled in L0_CONFIG (32x32)
 	const uword view_map_sizew = 32			; size of map as word
+	const uword view_map_size_pixelsw = 512			; size in pixels of map enabled in L0_CONFIG (32x32)
 	const uword view_map_size_bytesw = 2048;		; num bytes for view map
 
 	; filled in at load_map() time
@@ -205,7 +206,7 @@ main {
 		uword bob_anim_time = cbm.RDTIM16()
 		const uword bob_anim_rate = 6 ; in jiffies
 
-		const uword key_delay = 2
+		const uword key_delay = 8
 		uword key_time = cbm.RDTIM16() + key_delay
 
 		uword belt_anim_time = cbm.RDTIM16()
@@ -363,18 +364,18 @@ main {
 					bob_anim_time = tm + bob_anim_rate
 				}
 				bob_anim(bob_dir, bob_frame)
-				emudbg.console_write(conv.str_uw(bob_px))
-				emudbg.console_write(",")
-				emudbg.console_write(conv.str_uw(bob_py))
-				emudbg.console_write(" s ")
-				emudbg.console_write(conv.str_uw(bob_screen_pos_px))
-				emudbg.console_write(",")
-				emudbg.console_write(conv.str_uw(bob_screen_pos_py))
-				emudbg.console_write(" c ")
-				emudbg.console_write(conv.str_uw(cursor_tx))
-				emudbg.console_write(",")
-				emudbg.console_write(conv.str_uw(cursor_ty))
-				emudbg.console_write("    \n")
+;				emudbg.console_write(conv.str_uw(bob_px))
+;				emudbg.console_write(",")
+;				emudbg.console_write(conv.str_uw(bob_py))
+;				emudbg.console_write(" s ")
+;				emudbg.console_write(conv.str_uw(bob_screen_pos_px))
+;				emudbg.console_write(",")
+;				emudbg.console_write(conv.str_uw(bob_screen_pos_py))
+;				emudbg.console_write(" c ")
+;				emudbg.console_write(conv.str_uw(cursor_tx))
+;				emudbg.console_write(",")
+;				emudbg.console_write(conv.str_uw(cursor_ty))
+;				emudbg.console_write("    \n")
 				show_cursor(0)
 			}
 
@@ -445,6 +446,7 @@ main {
 			BOB_DIR_LT -> do_scroll_left(bob_speed)
 			BOB_DIR_RT -> do_scroll_right(bob_speed)
 		}
+		show_cursor(0)
 	}
 	sub do_scroll_right(uword speed_px)
 	{
@@ -837,14 +839,23 @@ ubyte tiles_machine_assembler
 
 		uword cursor_screen_pos_px = real_tx_to_screen_pos(cursor_tx)
 		uword cursor_screen_pos_py = real_ty_to_screen_pos(cursor_ty)
-		emudbg.console_write(conv.str_uw(cursor_tx))
-		emudbg.console_write(",")
-		emudbg.console_write(conv.str_uw(cursor_ty))
-		emudbg.console_write(" ")
-		emudbg.console_write(conv.str_uw(cursor_screen_pos_px))
-		emudbg.console_write(",")
-		emudbg.console_write(conv.str_uw(cursor_screen_pos_py))
-		emudbg.console_write("  \n")
+;		emudbg.console_write("r ")
+;		emudbg.console_write(conv.str_ub(cursor_tx))
+;		emudbg.console_write(",")
+;		emudbg.console_write(conv.str_uw(cursor_ty))
+;		emudbg.console_write(" v ")
+;		emudbg.console_write(conv.str_ub(real_to_view_tx(cursor_tx)))
+;		emudbg.console_write(",")
+;		emudbg.console_write(conv.str_ub(real_to_view_ty(cursor_ty)))
+;		emudbg.console_write(" sp ")
+;		emudbg.console_write(conv.str_uw(cursor_screen_pos_px))
+;		emudbg.console_write(",")
+;		emudbg.console_write(conv.str_uw(cursor_screen_pos_py))
+;		emudbg.console_write(" so ")
+;		emudbg.console_write(conv.str_uw(screen_offset_px))
+;		emudbg.console_write(",")
+;		emudbg.console_write(conv.str_uw(screen_offset_py))
+;		emudbg.console_write("  \n")
 
 		cx16.VERA_ADDR_L = $08 ; sprite attribute #1 (cursor sprite)
 		cx16.VERA_ADDR_M = $FC
@@ -1224,16 +1235,41 @@ ubyte tiles_machine_assembler
 		return real_ty
 	}
 
+	sub is_real_tx_onscreen(ubyte real_tx) -> bool {
+		ubyte a = screen_pos_to_real_tx(0)
+		ubyte b = screen_pos_to_real_tx(screen_width_pixels+15)
+		if real_tx >= a and real_tx < b {
+			return true
+		}
+		return false
+	}
+	sub is_real_ty_onscreen(ubyte real_ty) -> bool {
+		ubyte a = screen_pos_to_real_ty(0)
+		ubyte b = screen_pos_to_real_ty(screen_height_pixels+15)
+		if real_ty >= a and real_ty < b {
+			return true
+		}
+		return false
+	}
+
 	sub real_tx_to_screen_pos(ubyte real_tx) -> uword {
-		uword screen_px
-		ubyte view_tx = real_to_view_tx(real_tx)
-		screen_px = (view_tx << 4) - screen_offset_px
+		uword screen_px = 512
+		if is_real_tx_onscreen(real_tx)
+		{
+			uword screen_left = screen_pos_to_real_tx(0) as uword
+			screen_px = (real_tx - screen_left) << 4
+			screen_px -= screen_offset_px % 16
+		}
 		return screen_px
 	}
 	sub real_ty_to_screen_pos(ubyte real_ty) -> uword {
-		uword screen_py
-		ubyte view_ty = real_to_view_ty(real_ty)
-		screen_py = (view_ty << 4) - screen_offset_py
+		uword screen_py = 512
+		if is_real_ty_onscreen(real_ty)
+		{
+			uword screen_top = screen_pos_to_real_ty(0) as uword
+			screen_py = (real_ty - screen_top) << 4
+			screen_py -= screen_offset_py % 16
+		}
 		return screen_py
 	}
 
