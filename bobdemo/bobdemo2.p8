@@ -213,7 +213,7 @@ main {
 		cycle_belt_palette()
 
 		uword mach_anim_time = cbm.RDTIM16()
-		const uword mach_anim_rate = 6 ; in jiffies
+		const uword mach_anim_rate = 8 ; in jiffies
 		cycle_mach_palette()
 
 
@@ -1367,16 +1367,16 @@ ubyte tiles_machine_assembler
 		}
 		colcycle_belt_current++
 	}
-	ubyte[] colcycle_mach_colindex = [13,15,7]
-	ubyte[] colcycle_mach_cols = [$F0,$0F,$A0,$0A,$AA,$0A,$AA,$0A]
+	ubyte[] colcycle_mach_colindex = [4,15,10]
+	ubyte[] colcycle_mach_cols = [$00,$0F,$F0,$0F,$50,$0F]
 	ubyte colcycle_mach_current = 0
 	sub cycle_mach_palette()
 	{
 		ubyte i
 		for i in 0 to 2 {
-			ubyte index = (i + colcycle_mach_current) % 4
+			ubyte index = (i + colcycle_mach_current) % 3
 			ubyte colindex = colcycle_mach_colindex[ index ] 
-			cx16.VERA_ADDR_L = $00 + 2*(16*PAL_belt + colindex)
+			cx16.VERA_ADDR_L = $00 + 2*(16*PAL_fur_asmb + colindex)
 			cx16.VERA_ADDR_M = $FA
 			cx16.VERA_ADDR_H = 1 | %00010000     ; bank=1, increment 1
 			cx16.VERA_DATA0 = colcycle_mach_cols[i*2]
